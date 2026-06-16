@@ -6,6 +6,7 @@ import {
   type SettingsData,
   type UserRow,
   type SyncLogRow,
+  type PropertyVisibilityRow,
 } from "@/components/settings/settings-client"
 
 function parseSettingValue(raw: unknown): string {
@@ -24,10 +25,11 @@ export default async function SettingsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: settingsData }, { data: usersData }, { data: logData }] = await Promise.all([
+  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
+    admin.from("properties").select("id, external_name, internal_name, is_active").order("external_name"),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -61,6 +63,18 @@ export default async function SettingsPage() {
     created_at     : e.created_at,
   }))
 
+  const properties: PropertyVisibilityRow[] = (propData ?? []).map(p => ({
+    id        : p.id,
+    name      : p.internal_name || p.external_name,
+    is_active : p.is_active ?? false,
+  }))
+
+  let hiddenIds: string[] = []
+  try {
+    const raw = rawSettings.hidden_properties
+    if (raw) hiddenIds = JSON.parse(raw)
+  } catch { /* malformed JSON — treat as empty */ }
+
   return (
     <div className="p-6 space-y-5 max-w-[900px]">
       <div>
@@ -70,7 +84,13 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsClient settings={settings} users={users} syncLog={syncLog} />
+      <SettingsClient
+        settings={settings}
+        users={users}
+        syncLog={syncLog}
+        properties={properties}
+        hiddenIds={hiddenIds}
+      />
     </div>
   )
 }

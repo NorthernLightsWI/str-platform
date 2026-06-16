@@ -165,3 +165,23 @@ export async function deleteUser(userId: string) {
     return { error: e instanceof Error ? e.message : "Unknown error" }
   }
 }
+
+// ── Property visibility ───────────────────────────────────────────────────────
+
+export async function setHiddenProperties(
+  hiddenIds: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+    const { error } = await admin
+      .from("app_settings")
+      .upsert({ key: "hidden_properties", value: JSON.stringify(hiddenIds) }, { onConflict: "key" })
+    if (error) return { ok: false, error: error.message }
+    revalidatePath("/overview")
+    revalidatePath("/properties")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to save" }
+  }
+}

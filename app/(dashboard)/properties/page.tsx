@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -24,13 +25,14 @@ function toYMD(d: Date) {
 
 export default async function PropertiesPage() {
   const supabase = await createClient()
+  const admin    = createAdminClient()
 
   const today   = utcToday()
   const cmStart = monthStart(today)
   const cmEnd   = addDays(today, 1)   // exclusive — includes today
   const cmDays  = (cmEnd.getTime() - cmStart.getTime()) / 86_400_000
 
-  const [{ data: propData }, { data: bkData }] = await Promise.all([
+  const [{ data: propData }, { data: bkData }, { data: hiddenSetting }] = await Promise.all([
     supabase
       .from("properties")
       .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active")
@@ -43,10 +45,22 @@ export default async function PropertiesPage() {
       .neq("status", "cancelled")
       .gte("arrival", toYMD(cmStart))
       .lt("arrival",  toYMD(cmEnd)),
+
+    admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "hidden_properties")
+      .single(),
   ])
 
-  const properties = propData ?? []
-  const bookings   = bkData   ?? []
+  let hiddenIds = new Set<string>()
+  try {
+    const raw = (hiddenSetting as { value: unknown } | null)?.value
+    if (raw) hiddenIds = new Set(JSON.parse(String(raw)))
+  } catch { /* malformed JSON — treat as empty */ }
+
+  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const bookings   = bkData ?? []
 
   // Group bookings by property_id
   const bkByProp = new Map<string, typeof bookings>()
@@ -88,7 +102,9 @@ export default async function PropertiesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Properties</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          {properties.length} {properties.length === 1 ? "property" : "properties"} · MTD metrics through today
+          {properties.length} {properties.length === 1 ? "property" : "properties"} visible
+          {hiddenIds.size > 0 && ` · ${hiddenIds.size} hidden`}
+          {" · MTD metrics through today"}
         </p>
       </div>
 
