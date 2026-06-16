@@ -46,7 +46,7 @@ export function RevenueChart({ data }: { data: RevenueDataPoint[] }) {
             fontSize: "12px",
             color: "#f5f5f5",
           }}
-          formatter={(value: number) => [fmt(value), "Revenue"]}
+          formatter={(value) => [fmt(Number(value ?? 0)), "Revenue"]}
         />
         <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
           {data.map((_, i) => (

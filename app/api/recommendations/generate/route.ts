@@ -209,7 +209,7 @@ async function generateRecommendations() {
     .delete()
     .in("property_id", propertyIds)
     .eq("is_dismissed", false)
-    .eq("is_completed", false)
+    .eq("is_completed" as any, false)
 
   const rows: {
     property_id      : string
@@ -262,7 +262,7 @@ async function generateRecommendations() {
   }
 
   if (rows.length) {
-    const { error: insErr } = await admin.from("recommendations").insert(rows)
+    const { error: insErr } = await admin.from("recommendations").insert(rows as any)
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }

@@ -65,7 +65,7 @@ export function IssueCard({ issue }: { issue: IssueData }) {
 
   function handleStatusChange(val: string) {
     setStatus(val)
-    startStatus(() => updateIssueStatus(issue.id, val))
+    startStatus(async () => { await updateIssueStatus(issue.id, val) })
   }
 
   function handleSaveNotes() {

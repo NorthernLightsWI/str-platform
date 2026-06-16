@@ -17,11 +17,22 @@ export default async function RecommendationsPage() {
     `)
     .order("created_at", { ascending: false })
 
-  type RawRec = NonNullable<typeof data>[number] & {
-    properties: { internal_name: string | null; external_name: string } | null
+  type RawRec = {
+    id               : string
+    property_id      : string | null
+    title            : string
+    body             : string | null
+    priority         : string | null
+    category         : string | null
+    impact_statement : string | null
+    action_steps     : string[] | null
+    is_dismissed     : boolean | null
+    is_completed     : boolean | null
+    created_at       : string
+    properties       : { internal_name: string | null; external_name: string } | null
   }
 
-  const recs: RecommendationData[] = ((data ?? []) as RawRec[]).map(r => ({
+  const recs: RecommendationData[] = ((data ?? []) as unknown as RawRec[]).map(r => ({
     id               : r.id,
     property_id      : r.property_id,
     property_name    : r.properties
@@ -29,12 +40,12 @@ export default async function RecommendationsPage() {
       : "Unknown property",
     title            : r.title,
     body             : r.body,
-    priority         : r.priority,
-    category         : r.category,
-    impact_statement : (r as any).impact_statement ?? null,
-    action_steps     : (r as any).action_steps ?? null,
-    is_dismissed     : r.is_dismissed,
-    is_completed     : (r as any).is_completed ?? false,
+    priority         : r.priority         ?? "low",
+    category         : r.category         ?? "occupancy",
+    impact_statement : r.impact_statement ?? null,
+    action_steps     : r.action_steps     ?? null,
+    is_dismissed     : r.is_dismissed     ?? false,
+    is_completed     : r.is_completed     ?? false,
     created_at       : r.created_at,
   }))
 

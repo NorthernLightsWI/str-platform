@@ -54,7 +54,7 @@ export function OccupancyChart({ data }: { data: OccupancyDataPoint[] }) {
             fontSize: "12px",
             color: "#f5f5f5",
           }}
-          formatter={(value: number) => [value + "%", "Occupancy"]}
+          formatter={(value) => [String(value ?? 0) + "%", "Occupancy"]}
         />
         <Bar dataKey="occupancy" radius={[0, 4, 4, 0]}>
           {data.map((d, i) => (

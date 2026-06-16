@@ -15,7 +15,7 @@ export function MarkCleanButton({ propertyId, bookingId }: Props) {
   return (
     <button
       disabled={pending}
-      onClick={() => startTransition(() => markAsClean(propertyId, bookingId))}
+      onClick={() => startTransition(async () => { await markAsClean(propertyId, bookingId) })}
       className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {pending

@@ -32,7 +32,7 @@ export async function createIssue(data: {
     category      : data.category.trim()     || null,
     notes         : data.notes.trim()        || null,
     status        : "open",
-  })
+  } as any)
 
   if (error) return { error: error.message }
   revalidate()
@@ -54,7 +54,7 @@ export async function updateIssueStatus(id: string, status: string) {
   const admin = createAdminClient()
   const { error } = await admin
     .from("maintenance_issues")
-    .update(patch)
+    .update(patch as any)
     .eq("id", id)
 
   if (error) return { error: error.message }
@@ -70,7 +70,7 @@ export async function updateIssueNotes(id: string, notes: string) {
   const admin = createAdminClient()
   const { error } = await admin
     .from("maintenance_issues")
-    .update({ notes: notes.trim() || null })
+    .update({ notes: notes.trim() || null } as any)
     .eq("id", id)
 
   if (error) return { error: error.message }

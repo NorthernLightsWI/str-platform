@@ -22,16 +22,26 @@ export default async function MaintenancePage() {
       .order("external_name"),
   ])
 
-  type RawIssue = NonNullable<typeof issueData>[number] & {
-    properties : { external_name: string; internal_name: string | null } | null
+  type RawIssue = {
+    id            : string
+    title         : string
+    description   : string | null
+    category      : string | null
+    priority      : string | null
+    status        : string
+    notes         : string | null
+    reporter_name : string | null
+    created_at    : string
+    resolved_at   : string | null
+    properties    : { external_name: string; internal_name: string | null } | null
   }
 
-  const issues: IssueData[] = ((issueData ?? []) as RawIssue[]).map(r => ({
+  const issues: IssueData[] = ((issueData ?? []) as unknown as RawIssue[]).map(r => ({
     id            : r.id,
     title         : r.title,
     description   : r.description,
     category      : r.category,
-    priority      : r.priority,
+    priority      : r.priority ?? "low",
     status        : r.status,
     notes         : r.notes,
     created_at    : r.created_at,
@@ -39,7 +49,7 @@ export default async function MaintenancePage() {
     property_name : r.properties
       ? (r.properties.internal_name || r.properties.external_name)
       : "Unknown property",
-    reporter_name : (r as { reporter_name?: string | null }).reporter_name ?? null,
+    reporter_name : r.reporter_name ?? null,
   }))
 
   const properties = (propData ?? []).map(p => ({
