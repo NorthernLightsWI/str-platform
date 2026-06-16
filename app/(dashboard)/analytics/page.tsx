@@ -4,6 +4,7 @@ import {
   type BookingRaw,
   type PropertyRaw,
 } from "@/components/analytics/analytics-client"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 export default async function AnalyticsPage() {
   const admin = createAdminClient()
@@ -15,7 +16,7 @@ export default async function AnalyticsPage() {
   cutoff.setMonth(cutoff.getMonth() - 13)
   const cutoffStr = cutoff.toISOString().slice(0, 10)
 
-  const [{ data: bookingData }, { data: propData }] = await Promise.all([
+  const [{ data: bookingData }, { data: propData }, hiddenIds] = await Promise.all([
     admin
       .from("bookings")
       .select("arrival, departure, total_amount, net_revenue, listing_site, property_id")
@@ -28,21 +29,27 @@ export default async function AnalyticsPage() {
       .from("properties")
       .select("id, internal_name, external_name")
       .eq("is_active", true),
+
+    getHiddenPropertyIds(),
   ])
 
-  const bookings: BookingRaw[] = (bookingData ?? []).map(b => ({
-    arrival      : b.arrival,
-    departure    : b.departure,
-    total_amount : b.total_amount,
-    net_revenue  : b.net_revenue,
-    listing_site : b.listing_site,
-    property_id  : b.property_id,
-  }))
+  const bookings: BookingRaw[] = (bookingData ?? [])
+    .filter(b => !hiddenIds.has(b.property_id))
+    .map(b => ({
+      arrival      : b.arrival,
+      departure    : b.departure,
+      total_amount : b.total_amount,
+      net_revenue  : b.net_revenue,
+      listing_site : b.listing_site,
+      property_id  : b.property_id,
+    }))
 
-  const properties: PropertyRaw[] = (propData ?? []).map(p => ({
-    id  : p.id,
-    name: p.internal_name || p.external_name,
-  }))
+  const properties: PropertyRaw[] = (propData ?? [])
+    .filter(p => !hiddenIds.has(p.id))
+    .map(p => ({
+      id  : p.id,
+      name: p.internal_name || p.external_name,
+    }))
 
   return (
     <div className="p-6 space-y-5 max-w-[1400px]">

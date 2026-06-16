@@ -1,8 +1,8 @@
 import { ArrowUpRight, ArrowDownRight, DollarSign, Home, TrendingUp, BarChart3 } from "lucide-react"
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
 import { RevenueChart, type RevenueDataPoint   } from "@/components/overview/revenue-chart"
 import { OccupancyChart, type OccupancyDataPoint } from "@/components/overview/occupancy-chart"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { cn } from "@/lib/utils"
 
 // ── Date helpers (UTC-safe, no external deps) ─────────────────────────────────
@@ -177,9 +177,7 @@ export default async function OverviewPage() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const admin = createAdminClient()
-
-  const [{ data: propData }, { data: bkData }, { data: recentData }, { data: settingsData }] = await Promise.all([
+  const [{ data: propData }, { data: bkData }, { data: recentData }, hiddenIds] = await Promise.all([
     supabase
       .from("properties")
       .select("id, external_name, internal_name, is_active"),
@@ -198,18 +196,8 @@ export default async function OverviewPage() {
       .order("arrival", { ascending: false })
       .limit(10),
 
-    admin
-      .from("app_settings")
-      .select("key, value")
-      .eq("key", "hidden_properties")
-      .single(),
+    getHiddenPropertyIds(),
   ])
-
-  let hiddenIds = new Set<string>()
-  try {
-    const raw = (settingsData as { key: string; value: unknown } | null)?.value
-    if (raw) hiddenIds = new Set(JSON.parse(String(raw)))
-  } catch { /* malformed JSON — treat as empty */ }
 
   const properties : PropertyRow[] = (propData ?? []) as PropertyRow[]
   const bookings   : BookingRow[]  = (bkData   ?? []) as BookingRow[]

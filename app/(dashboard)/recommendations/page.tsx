@@ -3,19 +3,24 @@ import {
   RecommendationsClient,
   type RecommendationData,
 } from "@/components/recommendations/recommendations-client"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 export default async function RecommendationsPage() {
   const admin = createAdminClient()
 
-  const { data } = await admin
-    .from("recommendations")
-    .select(`
-      id, property_id, title, body, priority, category,
-      impact_statement, action_steps,
-      is_dismissed, is_completed, created_at,
-      properties(internal_name, external_name)
-    `)
-    .order("created_at", { ascending: false })
+  const [{ data }, hiddenIds] = await Promise.all([
+    admin
+      .from("recommendations")
+      .select(`
+        id, property_id, title, body, priority, category,
+        impact_statement, action_steps,
+        is_dismissed, is_completed, created_at,
+        properties(internal_name, external_name)
+      `)
+      .order("created_at", { ascending: false }),
+
+    getHiddenPropertyIds(),
+  ])
 
   type RawRec = {
     id               : string
@@ -32,7 +37,9 @@ export default async function RecommendationsPage() {
     properties       : { internal_name: string | null; external_name: string } | null
   }
 
-  const recs: RecommendationData[] = ((data ?? []) as unknown as RawRec[]).map(r => ({
+  const recs: RecommendationData[] = ((data ?? []) as unknown as RawRec[])
+    .filter(r => !r.property_id || !hiddenIds.has(r.property_id))
+    .map(r => ({
     id               : r.id,
     property_id      : r.property_id,
     property_name    : r.properties

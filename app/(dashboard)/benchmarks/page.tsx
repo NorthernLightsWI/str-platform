@@ -4,6 +4,7 @@ import {
   type PropertyRow,
   type PortfolioSummary,
 } from "@/components/benchmarks/benchmarks-client"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 // ── Market baselines — Appleton, WI ──────────────────────────────────────────
 // Defined here (server-side) to avoid importing runtime values from a
@@ -40,7 +41,7 @@ export default async function BenchmarksPage() {
   const periodStartStr = periodStart.toISOString().slice(0, 10)
   const todayStr       = new Date().toISOString().slice(0, 10)
 
-  const [{ data: propData }, { data: bookingData }] = await Promise.all([
+  const [{ data: propData }, { data: bookingData }, hiddenIds] = await Promise.all([
     admin
       .from("properties")
       .select("id, internal_name, external_name")
@@ -54,7 +55,11 @@ export default async function BenchmarksPage() {
       .eq("is_block", false)
       .gte("arrival", periodStartStr)
       .lt("arrival", todayStr),
+
+    getHiddenPropertyIds(),
   ])
+
+  const visibleProps = (propData ?? []).filter(p => !hiddenIds.has(p.id))
 
   // Group bookings by property_id
   const byProperty = new Map<string, NonNullable<typeof bookingData>>()
@@ -64,7 +69,7 @@ export default async function BenchmarksPage() {
     byProperty.set(b.property_id, arr)
   }
 
-  const rows: PropertyRow[] = (propData ?? []).map(p => {
+  const rows: PropertyRow[] = visibleProps.map(p => {
     const bookings     = byProperty.get(p.id) ?? []
     let   bookedNights = 0
     let   revenue      = 0

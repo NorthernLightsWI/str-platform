@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -25,14 +25,13 @@ function toYMD(d: Date) {
 
 export default async function PropertiesPage() {
   const supabase = await createClient()
-  const admin    = createAdminClient()
 
   const today   = utcToday()
   const cmStart = monthStart(today)
   const cmEnd   = addDays(today, 1)   // exclusive — includes today
   const cmDays  = (cmEnd.getTime() - cmStart.getTime()) / 86_400_000
 
-  const [{ data: propData }, { data: bkData }, { data: hiddenSetting }] = await Promise.all([
+  const [{ data: propData }, { data: bkData }, hiddenIds] = await Promise.all([
     supabase
       .from("properties")
       .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active")
@@ -46,18 +45,8 @@ export default async function PropertiesPage() {
       .gte("arrival", toYMD(cmStart))
       .lt("arrival",  toYMD(cmEnd)),
 
-    admin
-      .from("app_settings")
-      .select("value")
-      .eq("key", "hidden_properties")
-      .single(),
+    getHiddenPropertyIds(),
   ])
-
-  let hiddenIds = new Set<string>()
-  try {
-    const raw = (hiddenSetting as { value: unknown } | null)?.value
-    if (raw) hiddenIds = new Set(JSON.parse(String(raw)))
-  } catch { /* malformed JSON — treat as empty */ }
 
   const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
   const bookings   = bkData ?? []
