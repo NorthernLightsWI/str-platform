@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/sync/ownerrez",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/recommendations/generate",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}
