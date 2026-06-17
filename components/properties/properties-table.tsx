@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Search, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { healthColor } from "@/lib/health-score"
 
 export type PropertyRow = {
   id           : string
@@ -18,16 +19,29 @@ export type PropertyRow = {
   mtdRevenue   : number
   mtdOccupancy : number   // 0–100
   mtdAdr       : number
+  healthScore  : number   // 0–100
 }
 
-type SortKey = "name" | "city" | "bedrooms" | "occupancy" | "adr" | "revenue"
+type SortKey = "name" | "city" | "bedrooms" | "occupancy" | "adr" | "revenue" | "health"
 type SortDir = "asc" | "desc"
 
 function SortIcon({ col, active, dir }: { col: SortKey; active: SortKey; dir: SortDir }) {
   if (col !== active) return <ChevronsUpDown className="size-3 opacity-30" />
-  return dir === "asc"
-    ? <ChevronUp   className="size-3" />
-    : <ChevronDown className="size-3" />
+  return dir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
+}
+
+function HealthBadge({ score }: { score: number }) {
+  const color = healthColor(score)
+  return (
+    <span className={cn(
+      "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+      color === "green"  && "bg-emerald-400/15 text-emerald-500",
+      color === "yellow" && "bg-amber-400/15 text-amber-500",
+      color === "red"    && "bg-red-400/15 text-red-500",
+    )}>
+      {score}
+    </span>
+  )
 }
 
 export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
@@ -67,12 +81,12 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
         case "occupancy": cmp = a.mtdOccupancy - b.mtdOccupancy; break
         case "adr":       cmp = a.mtdAdr - b.mtdAdr; break
         case "revenue":   cmp = a.mtdRevenue - b.mtdRevenue; break
+        case "health":    cmp = a.healthScore - b.healthScore; break
       }
       return sortDir === "asc" ? cmp : -cmp
     })
 
-  const fmt = (n: number) =>
-    "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 })
+  const fmt = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 })
 
   const ThBtn = ({ col, children }: { col: SortKey; children: React.ReactNode }) => (
     <button
@@ -94,7 +108,7 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search properties…"
-            className="w-full rounded-lg border border-input bg-white pl-9 pr-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+            className="w-full rounded-lg border border-input bg-background pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
           />
         </div>
 
@@ -128,6 +142,7 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-5 py-3 text-left"><ThBtn col="name">Property</ThBtn></th>
+                <th className="px-4 py-3 text-center"><ThBtn col="health">Score</ThBtn></th>
                 <th className="px-5 py-3 text-left"><ThBtn col="city">Location</ThBtn></th>
                 <th className="px-5 py-3 text-left"><ThBtn col="bedrooms">Beds / Baths</ThBtn></th>
                 <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-muted-foreground">Guests</th>
@@ -140,7 +155,7 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
             <tbody className="divide-y divide-border">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={9} className="px-5 py-12 text-center text-sm text-muted-foreground">
                     No properties match your search
                   </td>
                 </tr>
@@ -160,6 +175,9 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
                       </p>
                     )}
                   </td>
+                  <td className="px-4 py-3.5 text-center">
+                    <HealthBadge score={row.healthScore} />
+                  </td>
                   <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
                     {[row.city, row.state].filter(Boolean).join(", ") || "—"}
                   </td>
@@ -173,9 +191,9 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
                   <td className="px-5 py-3.5 text-right tabular-nums">
                     <span className={cn(
                       "font-medium",
-                      row.mtdOccupancy >= 70 ? "text-emerald-400"  :
-                      row.mtdOccupancy >= 40 ? "text-yellow-400"   :
-                      row.mtdOccupancy  > 0  ? "text-red-400"      :
+                      row.mtdOccupancy >= 70 ? "text-emerald-400" :
+                      row.mtdOccupancy >= 40 ? "text-yellow-400"  :
+                      row.mtdOccupancy  > 0  ? "text-red-400"     :
                       "text-muted-foreground",
                     )}>
                       {row.mtdOccupancy > 0 ? row.mtdOccupancy.toFixed(1) + "%" : "—"}
