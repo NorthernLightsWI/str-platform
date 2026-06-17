@@ -30,6 +30,8 @@ export interface OwnerRezProperty {
   bedrooms      : number | null
   bathrooms     : number | null
   address       : OwnerRezAddress | null
+  description?  : string | null
+  photos?       : Array<{ id: number; url?: string }> | null
 }
 
 export interface OwnerRezGuest {

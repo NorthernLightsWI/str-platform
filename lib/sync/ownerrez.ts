@@ -94,6 +94,8 @@ export async function runOwnerRezSync(): Promise<SyncResult> {
       max_guests    : p.max_guests,
       public_url    : p.public_url,
       thumbnail_url : p.thumbnail_url,
+      description   : p.description   ?? null,
+      photo_count   : p.photos?.length ?? null,
       bedrooms      : p.bedrooms,
       bathrooms     : p.bathrooms != null ? Number(p.bathrooms) : null,
       address       : p.address?.street     ?? null,
@@ -104,7 +106,7 @@ export async function runOwnerRezSync(): Promise<SyncResult> {
       is_active     : p.active && !p.is_snoozed,
     }))
 
-    const { error: propErr } = await supabase
+    const { error: propErr } = await (supabase as any)
       .from("properties")
       .upsert(propertyRows, { onConflict: "ownerrez_id" })
     if (propErr) throw propErr
