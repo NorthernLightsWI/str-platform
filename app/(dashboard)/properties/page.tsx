@@ -76,12 +76,19 @@ export default async function PropertiesPage() {
 
   // ── Pre-aggregate health score inputs ─────────────────────────────────────
 
-  // Reviews: avg rating + count per property
-  const reviewMap = new Map<string, { total: number; count: number }>()
+  // Reviews: count ALL reviews per property; separately track rating sum/count
+  // so that properties with reviews but null overall_rating still get credit
+  // for the reviewCount portion of the health score.
+  const reviewMap = new Map<string, { total: number; ratedCount: number; reviewCount: number }>()
   for (const r of (reviewData ?? [])) {
-    if (!r.property_id || r.overall_rating == null) continue
-    const cur = reviewMap.get(r.property_id) ?? { total: 0, count: 0 }
-    reviewMap.set(r.property_id, { total: cur.total + Number(r.overall_rating), count: cur.count + 1 })
+    if (!r.property_id) continue
+    const cur = reviewMap.get(r.property_id) ?? { total: 0, ratedCount: 0, reviewCount: 0 }
+    const rating = r.overall_rating != null ? Number(r.overall_rating) : null
+    reviewMap.set(r.property_id, {
+      total       : cur.total + (rating ?? 0),
+      ratedCount  : cur.ratedCount + (rating != null ? 1 : 0),
+      reviewCount : cur.reviewCount + 1,
+    })
   }
 
   // Cleaning: set of property IDs that have a recent completed clean
@@ -130,8 +137,8 @@ export default async function PropertiesPage() {
     const input: HealthInput = {
       occupancy12m          : occ12m,
       adr12m                : adr12m,
-      reviewCount           : rws?.count ?? 0,
-      avgRating             : rws ? rws.total / rws.count : 0,
+      reviewCount           : rws?.reviewCount ?? 0,
+      avgRating             : rws && rws.ratedCount > 0 ? rws.total / rws.ratedCount : 0,
       hasRecentCleaning     : recentCleanSet.has(p.id),
       openHighPriorityIssues: maintCountMap.get(p.id) ?? 0,
     }

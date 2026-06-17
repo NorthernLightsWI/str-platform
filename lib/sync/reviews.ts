@@ -60,22 +60,27 @@ export async function runReviewsSync(): Promise<ReviewsSyncResult> {
 
       const orReviews = await fetchReviewsForProperty(creds, prop.ownerrez_id)
 
-      const reviewRows = orReviews.map(r => ({
+      const reviewRows = orReviews.map(r => {
+        // OwnerRez v2 field names vary — try all known aliases so nothing is
+        // silently dropped when the API uses a different key than expected.
+        const a = r as any  // escape hatch for undocumented / aliased fields
+        return ({
         ownerrez_id          : String(r.id),
         property_id          : prop.id,
-        listing_site         : r.listing_site         ?? null,
-        reviewer_name        : r.reviewer_name        ?? null,
-        overall_rating       : r.rating               ?? null,
-        cleanliness_rating   : r.cleanliness          ?? null,
-        communication_rating : r.communication        ?? null,
-        location_rating      : r.location             ?? null,
-        accuracy_rating      : r.accuracy             ?? null,
-        value_rating         : r.value                ?? null,
-        review_text          : r.comments             ?? null,
-        response_text        : r.response             ?? null,
-        response_at          : r.response_date        ?? null,
-        reviewed_at          : r.submitted_date       ?? null,
-      }))
+        listing_site         : r.listing_site  ?? a.platform    ?? a.channel       ?? null,
+        reviewer_name        : r.reviewer_name ?? a.guest_name  ?? a.author        ?? a.guest?.name ?? null,
+        overall_rating       : r.rating        ?? a.overall     ?? a.overall_rating ?? a.score       ?? null,
+        cleanliness_rating   : r.cleanliness   ?? a.cleanliness_rating             ?? null,
+        communication_rating : r.communication ?? a.communication_rating           ?? null,
+        location_rating      : r.location      ?? a.location_rating                ?? null,
+        accuracy_rating      : r.accuracy      ?? a.accuracy_rating                ?? null,
+        value_rating         : r.value         ?? a.value_rating                   ?? null,
+        review_text          : r.comments      ?? a.body        ?? a.review        ?? a.review_text  ?? null,
+        response_text        : r.response      ?? a.response_text                  ?? null,
+        response_at          : r.response_date  ?? a.response_at  ?? null,
+        reviewed_at          : r.submitted_date ?? a.submitted_at ?? a.reviewed_at ?? null,
+      })
+      })
 
       if (reviewRows.length > 0) {
         const { error } = await supabase

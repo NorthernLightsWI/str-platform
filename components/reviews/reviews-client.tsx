@@ -88,7 +88,7 @@ function ReviewCard({ review }: { review: ReviewData }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-semibold text-foreground truncate">
-            {review.reviewer_name ?? "Anonymous Guest"}
+            {review.reviewer_name || review.property_name || "Guest"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">{review.property_name}</p>
           <div className="flex flex-wrap items-center gap-2 mt-1.5">

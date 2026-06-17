@@ -112,9 +112,12 @@ export default async function PropertyDetailPage({
   const adr12m  = nights12m > 0 ? rev12m / nights12m : 0
   const revpar  = rev12m / 365
 
-  const ratings     = (reviewData ?? []).map(r => Number(r.overall_rating)).filter(n => isFinite(n) && n > 0)
+  const allReviews  = reviewData ?? []
+  const ratings     = allReviews
+    .map(r => r.overall_rating != null ? Number(r.overall_rating) : null)
+    .filter((n): n is number => n !== null && isFinite(n) && n > 0)
   const avgRating   = ratings.length > 0 ? ratings.reduce((s, n) => s + n, 0) / ratings.length : 0
-  const reviewCount = ratings.length
+  const reviewCount = allReviews.length   // count all reviews, not just those with a rating
 
   const input: HealthInput = {
     occupancy12m          : occ12m,
