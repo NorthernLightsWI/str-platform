@@ -180,3 +180,10 @@ export async function fetchReviews(
 ): Promise<OwnerRezReview[]> {
   return fetchAllPages<OwnerRezReview>(creds, "/reviews")
 }
+
+export async function fetchReviewsForProperty(
+  creds      : OwnerRezCredentials,
+  propertyId : string,
+): Promise<OwnerRezReview[]> {
+  return fetchAllPages<OwnerRezReview>(creds, "/reviews", { property_id: propertyId })
+}

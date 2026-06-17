@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import {
   saveSettings,
   syncOwnerRez,
+  syncReviews,
   testOwnerRezConnection,
   testPriceLabsConnection,
   inviteCleaner,
@@ -183,7 +184,7 @@ function IntegrationsTab({ initial }: { initial: SettingsData }) {
     if (!data.ok) setSyncResult({ error: data.error })
     else setSyncResult({
       ok: true,
-      message: `Synced ${data.propertiesSynced} properties · ${data.bookingsSynced} bookings · ${data.reviewsSynced} reviews`,
+      message: `Synced ${data.propertiesSynced} properties · ${data.bookingsSynced} bookings`,
     })
     setSyncing(false)
   }
@@ -466,9 +467,11 @@ function UsersTab({ initialUsers }: { initialUsers: UserRow[] }) {
 // ── Data Sync tab ─────────────────────────────────────────────────────────────
 
 function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
-  const [log,     setLog]     = useState(initialLog)
-  const [syncing, setSyncing] = useState(false)
-  const [result,  setResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [log,            setLog]            = useState(initialLog)
+  const [syncing,        setSyncing]        = useState(false)
+  const [result,         setResult]         = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [syncingReviews, setSyncingReviews] = useState(false)
+  const [reviewsResult,  setReviewsResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
   async function handleSync() {
     setSyncing(true)
@@ -479,13 +482,13 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
     } else {
       setResult({
         ok: true,
-        message: `Synced ${data.propertiesSynced} properties · ${data.bookingsSynced} bookings · ${data.reviewsSynced} reviews`,
+        message: `Synced ${data.propertiesSynced} properties · ${data.bookingsSynced} bookings`,
       })
       const newEntry: SyncLogRow = {
         id             : crypto.randomUUID(),
         sync_type      : "full",
         status         : "success",
-        records_synced : data.propertiesSynced + data.bookingsSynced + data.reviewsSynced,
+        records_synced : data.propertiesSynced + data.bookingsSynced,
         records_failed : 0,
         error_message  : null,
         started_at     : new Date().toISOString(),
@@ -495,6 +498,33 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
       setLog(prev => [newEntry, ...prev].slice(0, 10))
     }
     setSyncing(false)
+  }
+
+  async function handleSyncReviews() {
+    setSyncingReviews(true)
+    setReviewsResult(null)
+    const data = await syncReviews()
+    if (!data.ok) {
+      setReviewsResult({ error: data.error })
+    } else {
+      setReviewsResult({
+        ok: true,
+        message: `Synced ${data.reviewsSynced} reviews across ${data.propertiesProcessed} properties`,
+      })
+      const newEntry: SyncLogRow = {
+        id             : crypto.randomUUID(),
+        sync_type      : "reviews",
+        status         : "success",
+        records_synced : data.reviewsSynced,
+        records_failed : 0,
+        error_message  : null,
+        started_at     : new Date().toISOString(),
+        completed_at   : new Date().toISOString(),
+        created_at     : new Date().toISOString(),
+      }
+      setLog(prev => [newEntry, ...prev].slice(0, 10))
+    }
+    setSyncingReviews(false)
   }
 
   return (
@@ -512,6 +542,19 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
             {syncing ? "Syncing…" : "Sync Now"}
           </button>
           <ActionMsg result={result} />
+        </div>
+        <div className="border-t border-border pt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleSyncReviews}
+            disabled={syncingReviews}
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {syncingReviews
+              ? <Loader2 className="size-4 animate-spin" />
+              : <RefreshCw className="size-4" />}
+            {syncingReviews ? "Syncing Reviews…" : "Sync Reviews"}
+          </button>
+          <ActionMsg result={reviewsResult} />
         </div>
       </Card>
 

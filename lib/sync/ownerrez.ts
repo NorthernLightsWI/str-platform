@@ -2,7 +2,6 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import {
   fetchProperties,
   fetchBookings,
-  fetchReviews,
   type OwnerRezCredentials,
 } from "@/lib/integrations/ownerrez"
 
@@ -31,7 +30,6 @@ function normaliseStatus(raw: string): BookingStatus {
 export type SyncResult = {
   propertiesSynced : number
   bookingsSynced   : number
-  reviewsSynced    : number
 }
 
 export async function runOwnerRezSync(): Promise<SyncResult> {
@@ -83,7 +81,6 @@ export async function runOwnerRezSync(): Promise<SyncResult> {
   const syncId = syncEntry?.id
   let propertiesSynced = 0
   let bookingsSynced   = 0
-  let reviewsSynced    = 0
 
   try {
     // Properties
@@ -156,53 +153,19 @@ export async function runOwnerRezSync(): Promise<SyncResult> {
     if (bookingErr) throw bookingErr
     bookingsSynced = bookingRows.length
 
-    // Reviews
-    const orReviews = await fetchReviews(creds)
-
-    const reviewRows = orReviews
-      .map(r => {
-        const propertyUuid = propertyIdMap.get(String(r.property_id))
-        if (!propertyUuid) return null
-        return {
-          ownerrez_id          : String(r.id),
-          property_id          : propertyUuid,
-          listing_site         : r.listing_site         ?? null,
-          reviewer_name        : r.reviewer_name        ?? null,
-          overall_rating       : r.rating               ?? null,
-          cleanliness_rating   : r.cleanliness          ?? null,
-          communication_rating : r.communication        ?? null,
-          location_rating      : r.location             ?? null,
-          accuracy_rating      : r.accuracy             ?? null,
-          value_rating         : r.value                ?? null,
-          review_text          : r.comments             ?? null,
-          response_text        : r.response             ?? null,
-          response_at          : r.response_date        ?? null,
-          reviewed_at          : r.submitted_date       ?? null,
-        }
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-
-    if (reviewRows.length > 0) {
-      const { error: reviewErr } = await supabase
-        .from("reviews")
-        .upsert(reviewRows, { onConflict: "ownerrez_id" })
-      if (reviewErr) throw reviewErr
-    }
-    reviewsSynced = reviewRows.length
-
     if (syncId) {
       await supabase
         .from("sync_log")
         .update({
           status         : "success",
-          records_synced : propertiesSynced + bookingsSynced + reviewsSynced,
+          records_synced : propertiesSynced + bookingsSynced,
           records_failed : 0,
           completed_at   : new Date().toISOString(),
         })
         .eq("id", syncId)
     }
 
-    return { propertiesSynced, bookingsSynced, reviewsSynced }
+    return { propertiesSynced, bookingsSynced }
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
