@@ -43,6 +43,7 @@ export async function createTask(data: {
 
   if (error) return { error: error.message }
   revalidatePath(`/properties/${data.property_id}`)
+  revalidatePath("/tasks")
   return { ok: true }
 }
 
@@ -62,6 +63,7 @@ export async function updateTaskStatus(
   const { error } = await admin.from("tasks").update(patch).eq("id", id)
   if (error) return { error: error.message }
   revalidatePath(`/properties/${propertyId}`)
+  revalidatePath("/tasks")
   return { ok: true }
 }
 
@@ -77,5 +79,6 @@ export async function deleteTask(
   const { error } = await admin.from("tasks").delete().eq("id", id)
   if (error) return { error: error.message }
   revalidatePath(`/properties/${propertyId}`)
+  revalidatePath("/tasks")
   return { ok: true }
 }
