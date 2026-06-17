@@ -31,7 +31,11 @@
       "Bash(xargs grep -l \"primary\")",
       "Bash(python -m json.tool)",
       "Bash(xargs grep -la \"bg-primary\\\\|\\\\.primary\")",
-      "Bash(xargs grep -l \"primary\\\\|card\\\\|sidebar\")"
+      "Bash(xargs grep -l \"primary\\\\|card\\\\|sidebar\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git mv *)"
     ]
   }
 }

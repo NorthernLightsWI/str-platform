@@ -50,6 +50,11 @@ const OPS_ITEMS: NavItem[] = [
   { label: "Property Info",     href: "/operations/property-info",     icon: FileText      },
 ]
 
+const MAINTENANCE_ITEMS: NavItem[] = [
+  { label: "Property Info", href: "/operations/property-info", icon: FileText },
+  { label: "Maintenance",   href: "/operations/maintenance",   icon: Wrench   },
+]
+
 function NavLink({
   item,
   collapsed,
@@ -105,8 +110,9 @@ interface SidebarProps {
 
 export function Sidebar({ userName, role, mobileOpen = false, onMobileClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const isAdmin = role === "admin"
-  const initial = userName.charAt(0).toUpperCase()
+  const isAdmin       = role === "admin"
+  const isMaintenance = role === "maintenance"
+  const initial       = userName.charAt(0).toUpperCase()
 
   return (
     <aside
@@ -145,25 +151,33 @@ export function Sidebar({ userName, role, mobileOpen = false, onMobileClose }: S
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
-        {isAdmin && (
+        {isMaintenance ? (
+          MAINTENANCE_ITEMS.map((item) => (
+            <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
+          ))
+        ) : (
           <>
-            {ADMIN_ITEMS.map((item) => (
+            {isAdmin && (
+              <>
+                {ADMIN_ITEMS.map((item) => (
+                  <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
+                ))}
+                <SectionDivider label="Operations" collapsed={collapsed} />
+              </>
+            )}
+
+            {OPS_ITEMS.map((item) => (
               <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
             ))}
-            <SectionDivider label="Operations" collapsed={collapsed} />
+
+            {isAdmin && (
+              <NavLink
+                item={{ label: "Settings", href: "/settings", icon: Settings }}
+                collapsed={collapsed}
+                onClose={onMobileClose}
+              />
+            )}
           </>
-        )}
-
-        {OPS_ITEMS.map((item) => (
-          <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
-        ))}
-
-        {isAdmin && (
-          <NavLink
-            item={{ label: "Settings", href: "/settings", icon: Settings }}
-            collapsed={collapsed}
-            onClose={onMobileClose}
-          />
         )}
       </nav>
 
