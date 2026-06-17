@@ -1,8 +1,11 @@
-import { ArrowUpRight, ArrowDownRight, DollarSign, Home, TrendingUp, BarChart3 } from "lucide-react"
-import { createClient } from "@/lib/supabase/server"
+import { ArrowUpRight, ArrowDownRight, DollarSign, Home, TrendingUp, BarChart3, Activity, ExternalLink } from "lucide-react"
+import Link from "next/link"
+import { createClient }      from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { RevenueChart, type RevenueDataPoint   } from "@/components/overview/revenue-chart"
 import { OccupancyChart, type OccupancyDataPoint } from "@/components/overview/occupancy-chart"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
+import { computeHealthScore, healthColor, type HealthInput } from "@/lib/health-score"
 import { cn } from "@/lib/utils"
 
 // ── Date helpers (UTC-safe, no external deps) ─────────────────────────────────
@@ -156,6 +159,31 @@ function KPICard({
   )
 }
 
+// ── Health KPI card ───────────────────────────────────────────────────────────
+
+function HealthKPICard({ score, count }: { score: number; count: number }) {
+  const color  = healthColor(score)
+  const numCls =
+    color === "green"  ? "text-emerald-400" :
+    color === "yellow" ? "text-amber-400"   :
+    "text-red-400"
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-muted-foreground">Portfolio Health</p>
+        <div className="flex size-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
+          <Activity className="size-4" />
+        </div>
+      </div>
+      <p className={cn("text-3xl font-semibold tracking-tight tabular-nums", numCls)}>{score}</p>
+      <p className="text-xs text-muted-foreground">
+        avg across {count} active {count === 1 ? "property" : "properties"}
+      </p>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function OverviewPage() {
@@ -172,12 +200,23 @@ export default async function OverviewPage() {
 
   const chart12Start = prevMonthStart(today, 11)         // 12 months of data
 
-  const day30Start = addDays(today, -29)                 // rolling 30 days
-  const day30End   = addDays(today, 1)
+  const day30Start  = addDays(today, -29)                // rolling 30 days
+  const day30End    = addDays(today, 1)
+  const day60Start  = addDays(today, -60)                // recent cleaning window
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const [{ data: propData }, { data: bkData }, { data: recentData }, hiddenIds] = await Promise.all([
+  const admin = createAdminClient()
+
+  const [
+    { data: propData },
+    { data: bkData },
+    { data: recentData },
+    { data: reviewData },
+    { data: cleaningData },
+    { data: maintData },
+    hiddenIds,
+  ] = await Promise.all([
     supabase
       .from("properties")
       .select("id, external_name, internal_name, is_active"),
@@ -196,6 +235,22 @@ export default async function OverviewPage() {
       .order("arrival", { ascending: false })
       .limit(10),
 
+    admin
+      .from("reviews")
+      .select("property_id, overall_rating"),
+
+    admin
+      .from("cleaning_records")
+      .select("property_id")
+      .eq("status", "completed")
+      .gte("scheduled_date", toYMD(day60Start)),
+
+    admin
+      .from("maintenance_issues")
+      .select("property_id")
+      .in("status", ["open", "in_progress"])
+      .in("priority", ["high", "urgent"]),
+
     getHiddenPropertyIds(),
   ])
 
@@ -204,6 +259,78 @@ export default async function OverviewPage() {
 
   const activeProps  = properties.filter(p => p.is_active && !hiddenIds.has(p.id))
   const activeCount  = activeProps.length
+
+  // ── Health score inputs ───────────────────────────────────────────────────
+
+  const reviewMap = new Map<string, { ratingTotal: number; ratedCount: number; reviewCount: number }>()
+  for (const r of (reviewData ?? [])) {
+    if (!r.property_id) continue
+    const cur    = reviewMap.get(r.property_id) ?? { ratingTotal: 0, ratedCount: 0, reviewCount: 0 }
+    const rating = r.overall_rating != null ? Number(r.overall_rating) : null
+    reviewMap.set(r.property_id, {
+      ratingTotal : cur.ratingTotal + (rating ?? 0),
+      ratedCount  : cur.ratedCount  + (rating != null ? 1 : 0),
+      reviewCount : cur.reviewCount + 1,
+    })
+  }
+  const recentCleanSet = new Set((cleaningData ?? []).map(c => c.property_id))
+  const maintCountMap  = new Map<string, number>()
+  for (const m of (maintData ?? [])) {
+    if (!m.property_id) continue
+    maintCountMap.set(m.property_id, (maintCountMap.get(m.property_id) ?? 0) + 1)
+  }
+
+  // ── Health leaderboard rows ───────────────────────────────────────────────
+
+  type HealthRow = { id: string; name: string; healthScore: number; mtdRevenue: number; mtdOccupancy: number }
+
+  const healthRows: HealthRow[] = activeProps.map(p => {
+    const pbMTD = bookings.filter(b => {
+      if (b.status === "cancelled") return false
+      const a = new Date(b.arrival + "T00:00:00Z")
+      return b.property_id === p.id && a >= cmStart && a < cmEnd
+    })
+    const mtdRevenue = pbMTD.reduce((s, b) => s + (b.total_amount ?? 0), 0)
+    const mtdNights  = pbMTD.reduce((s, b) => {
+      const a = new Date(b.arrival   + "T00:00:00Z")
+      const d = new Date(b.departure + "T00:00:00Z")
+      return s + (d.getTime() - a.getTime()) / 86_400_000
+    }, 0)
+    const mtdOccupancy = cmDays > 0 ? Math.min(100, (mtdNights / cmDays) * 100) : 0
+
+    const pb12m     = bookings.filter(b => b.property_id === p.id && b.status !== "cancelled")
+    const rev12m    = pb12m.reduce((s, b) => s + (b.total_amount ?? 0), 0)
+    const nights12m = pb12m.reduce((s, b) => {
+      const a = new Date(b.arrival   + "T00:00:00Z")
+      const d = new Date(b.departure + "T00:00:00Z")
+      return s + (d.getTime() - a.getTime()) / 86_400_000
+    }, 0)
+    const occ12m = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
+    const adr12m = nights12m > 0 ? rev12m / nights12m : 0
+
+    const rws = reviewMap.get(p.id)
+    const input: HealthInput = {
+      occupancy12m          : occ12m,
+      adr12m,
+      reviewCount           : rws?.reviewCount ?? 0,
+      avgRating             : rws && rws.ratedCount > 0 ? rws.ratingTotal / rws.ratedCount : 0,
+      hasRecentCleaning     : recentCleanSet.has(p.id),
+      openHighPriorityIssues: maintCountMap.get(p.id) ?? 0,
+    }
+    const hs = computeHealthScore(input)
+
+    return {
+      id          : p.id,
+      name        : p.internal_name || p.external_name,
+      healthScore : hs.total,
+      mtdRevenue  : Math.round(mtdRevenue),
+      mtdOccupancy: +mtdOccupancy.toFixed(1),
+    }
+  }).sort((a, b) => a.healthScore - b.healthScore)   // worst first
+
+  const avgHealthScore = healthRows.length > 0
+    ? Math.round(healthRows.reduce((s, r) => s + r.healthScore, 0) / healthRows.length)
+    : 0
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -276,7 +403,7 @@ export default async function OverviewPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <KPICard
           label="Revenue (MTD)"
           value={kpiCM.revenue}
@@ -305,6 +432,7 @@ export default async function OverviewPage() {
           icon={BarChart3}
           fmt={fmtMoney}
         />
+        <HealthKPICard score={avgHealthScore} count={activeCount} />
       </div>
 
       {/* Charts row */}
@@ -384,6 +512,89 @@ export default async function OverviewPage() {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Portfolio Health leaderboard */}
+      <div className="rounded-xl border border-border bg-card">
+        <div className="px-5 py-4 border-b border-border">
+          <p className="text-sm font-semibold text-foreground">Portfolio Health</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Active properties sorted by health score — lowest first
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/20">
+                {[
+                  { label: "Property",      cls: "text-left   px-5" },
+                  { label: "Score",         cls: "text-center px-4" },
+                  { label: "Revenue (MTD)", cls: "text-right  px-5" },
+                  { label: "Occ % (MTD)",   cls: "text-right  px-5" },
+                  { label: "",              cls: "text-center px-4" },
+                ].map(({ label, cls }) => (
+                  <th key={label || "_action"} className={cn(
+                    "py-2.5 text-xs font-medium uppercase tracking-wider text-muted-foreground",
+                    cls,
+                  )}>
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {healthRows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                    No active properties
+                  </td>
+                </tr>
+              ) : healthRows.map(row => {
+                const color = healthColor(row.healthScore)
+                return (
+                  <tr key={row.id} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-5 py-3 font-medium text-foreground max-w-[240px] truncate">
+                      {row.name}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                        color === "green"  && "bg-emerald-400/15 text-emerald-500",
+                        color === "yellow" && "bg-amber-400/15   text-amber-500",
+                        color === "red"    && "bg-red-400/15     text-red-500",
+                      )}>
+                        {row.healthScore}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-right font-medium tabular-nums text-foreground">
+                      {row.mtdRevenue > 0 ? fmtMoney(row.mtdRevenue) : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right tabular-nums">
+                      <span className={cn(
+                        "font-medium",
+                        row.mtdOccupancy >= 70 ? "text-emerald-400" :
+                        row.mtdOccupancy >= 40 ? "text-yellow-400"  :
+                        row.mtdOccupancy  > 0  ? "text-red-400"     :
+                        "text-muted-foreground",
+                      )}>
+                        {row.mtdOccupancy > 0 ? row.mtdOccupancy.toFixed(1) + "%" : "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Link
+                        href={`/properties/${row.id}`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        View
+                        <ExternalLink className="size-3" />
+                      </Link>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
