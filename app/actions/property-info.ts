@@ -230,3 +230,44 @@ export async function deleteRecurringItem(
   revalidatePath("/operations/property-info")
   return { ok: true }
 }
+
+// ── Lockbox photo upload ──────────────────────────────────────────────────────
+
+export async function uploadLockboxPhoto(
+  propertyId: string,
+  formData  : FormData,
+): Promise<{ url?: string; error?: string }> {
+  const user = await getUser()
+  if (!user) return { error: "Unauthorized" }
+  if (!["admin", "cleaner"].includes(user.role)) return { error: "Forbidden" }
+
+  const file = formData.get("photo") as File | null
+  if (!file || file.size === 0) return { error: "No file provided" }
+  if (file.size > 10 * 1024 * 1024) return { error: "File too large (max 10 MB)" }
+
+  const ext  = (file.name.split(".").pop() ?? "jpg").toLowerCase()
+  const path = `lockbox/${propertyId}/${Date.now()}.${ext}`
+
+  const admin = createAdminClient()
+  const bytes = await file.arrayBuffer()
+
+  const { error: upErr } = await admin.storage
+    .from("property-photos")
+    .upload(path, bytes, { contentType: file.type, upsert: false })
+
+  if (upErr) return { error: upErr.message }
+
+  const { data: { publicUrl } } = admin.storage
+    .from("property-photos")
+    .getPublicUrl(path)
+
+  // Persist URL and log the change
+  await (admin as any)
+    .from("property_operational_info")
+    .upsert({ property_id: propertyId, lockbox_photo_url: publicUrl } as any, { onConflict: "property_id" })
+
+  await logChange(propertyId, user.id, user.name, "lockbox_photo", null, "Photo updated")
+
+  revalidatePath("/operations/property-info")
+  return { url: publicUrl }
+}
