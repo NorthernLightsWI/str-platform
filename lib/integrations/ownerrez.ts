@@ -175,15 +175,71 @@ export async function fetchBookings(
   return all.filter((b) => !b.is_block)
 }
 
+// ── Reviews-specific pager ─────────────────────────────────────────────────
+// The /reviews endpoint has returned inconsistent shapes across OwnerRez API
+// versions (bare array, { items: [] }, { reviews: [] }, etc.).  This function
+// logs the raw first-page response so the shape is visible in server logs, then
+// extracts items defensively regardless of which wrapper key is present.
+
+async function fetchReviewPages(
+  creds  : OwnerRezCredentials,
+  params : Record<string, string> = {},
+): Promise<OwnerRezReview[]> {
+  const all: OwnerRezReview[] = []
+  let pageNum = 1
+
+  while (true) {
+    const raw = await get<unknown>(creds, "/reviews", {
+      ...params,
+      limit    : String(PAGE_LIMIT),
+      page_num : String(pageNum),
+    })
+
+    if (pageNum === 1) {
+      // Log the shape so we can see what the API actually returns
+      try {
+        const preview = JSON.stringify(raw)?.slice(0, 600)
+        console.log(`[ownerrez] /reviews raw response (page 1, property_id=${params.property_id ?? "all"}):`, preview)
+      } catch { /* ignore stringify errors */ }
+    }
+
+    let items: OwnerRezReview[]
+    let nextPageUrl: string | null | undefined
+
+    if (Array.isArray(raw)) {
+      // Bare array response
+      items = raw as OwnerRezReview[]
+      nextPageUrl = null
+    } else if (raw !== null && typeof raw === "object") {
+      const obj = raw as Record<string, unknown>
+      // Try every key OwnerRez has been known to use
+      const candidate = obj.items ?? obj.reviews ?? obj.data ?? obj.results ?? null
+      items = Array.isArray(candidate) ? (candidate as OwnerRezReview[]) : []
+      nextPageUrl = typeof obj.next_page_url === "string" ? obj.next_page_url : null
+    } else {
+      items = []
+      nextPageUrl = null
+    }
+
+    all.push(...items)
+
+    if (items.length < PAGE_LIMIT || !nextPageUrl) break
+    pageNum++
+    await sleep(500)
+  }
+
+  return all
+}
+
 export async function fetchReviews(
   creds: OwnerRezCredentials,
 ): Promise<OwnerRezReview[]> {
-  return fetchAllPages<OwnerRezReview>(creds, "/reviews")
+  return fetchReviewPages(creds)
 }
 
 export async function fetchReviewsForProperty(
   creds      : OwnerRezCredentials,
   propertyId : string,
 ): Promise<OwnerRezReview[]> {
-  return fetchAllPages<OwnerRezReview>(creds, "/reviews", { property_id: propertyId })
+  return fetchReviewPages(creds, { property_id: propertyId })
 }
