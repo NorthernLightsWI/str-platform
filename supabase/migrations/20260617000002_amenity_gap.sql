@@ -10,6 +10,9 @@ create table if not exists property_amenities (
 
 alter table property_amenities enable row level security;
 
+drop policy if exists "Admins manage amenities" on property_amenities;
+drop policy if exists "Staff can read amenities" on property_amenities;
+
 create policy "Admins manage amenities"
   on property_amenities for all
   using (exists (select 1 from profiles where profiles.id = auth.uid() and profiles.role = 'admin'));
