@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Roboto_Mono, Montserrat } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const robotoMono = Roboto_Mono({
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${robotoMono.variable} ${montserrat.variable} dark`}>
       <body className="min-h-screen bg-background font-sans antialiased">
         {children}
+        <Script src="/sw-register.js" strategy="lazyOnload" />
       </body>
     </html>
   );
