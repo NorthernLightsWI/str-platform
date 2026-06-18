@@ -14,6 +14,7 @@ interface ListingAmenityItem {
   label? : string
   value? : string
   title? : string
+  text?  : string
 }
 
 // ── Name → internal key map ───────────────────────────────────────────────────
@@ -22,6 +23,7 @@ interface ListingAmenityItem {
 const OR_NAME_MAP: Record<string, string> = {
   // Connectivity
   "wireless internet"          : "wifi",
+  "internet / wifi"            : "wifi",
   "wifi"                       : "wifi",
   "wi-fi"                      : "wifi",
   "internet"                   : "wifi",
@@ -31,6 +33,7 @@ const OR_NAME_MAP: Record<string, string> = {
   "fiber"                      : "high_speed_wifi",
   "fast wifi"                  : "high_speed_wifi",
   "500 mbps"                   : "high_speed_wifi",
+  "laptop friendly workspace"  : "dedicated_workspace",
   "dedicated workspace"        : "dedicated_workspace",
   "home office"                : "dedicated_workspace",
   "workspace"                  : "dedicated_workspace",
@@ -51,10 +54,13 @@ const OR_NAME_MAP: Record<string, string> = {
   "fridge"                     : "refrigerator",
   "cooking basics"             : "cooking_basics",
   "pots and pans"              : "cooking_basics",
+  "pots & pans"                : "cooking_basics",
+  "dishes & utensils"          : "cooking_basics",
   "cooking utensils"           : "cooking_basics",
   // Laundry
   "washing machine"            : "washer",
   "washer"                     : "washer",
+  "clothes dryer"              : "dryer",
   "dryer"                      : "dryer",
   "iron and board"             : "iron_board",
   "iron & board"               : "iron_board",
@@ -92,6 +98,7 @@ const OR_NAME_MAP: Record<string, string> = {
   "central heating"            : "heating",
   "central heat"               : "heating",
   "heat"                       : "heating",
+  "ceiling fans"               : "ceiling_fan",
   "ceiling fan"                : "ceiling_fan",
   "space heater"               : "space_heater",
   "portable heater"            : "space_heater",
@@ -116,10 +123,12 @@ const OR_NAME_MAP: Record<string, string> = {
   "balcony"                    : "private_patio",
   "patio"                      : "private_patio",
   "deck"                       : "private_patio",
+  "outdoor grill"              : "bbq_grill",
   "bbq grill"                  : "bbq_grill",
   "barbeque"                   : "bbq_grill",
   "barbecue"                   : "bbq_grill",
   "grill"                      : "bbq_grill",
+  "outdoor seating"            : "outdoor_furniture",
   "outdoor furniture"          : "outdoor_furniture",
   "fire pit"                   : "fire_pit",
   "hot tub"                    : "hot_tub",
@@ -142,6 +151,7 @@ const OR_NAME_MAP: Record<string, string> = {
   "local guidebook"            : "local_guidebook",
   "neighborhood guide"         : "local_guidebook",
   "guidebook"                  : "local_guidebook",
+  "allows pets"                : "pet_friendly",
   "pets allowed"               : "pet_friendly",
   "pets welcome"               : "pet_friendly",
   "pet friendly"               : "pet_friendly",
@@ -150,7 +160,7 @@ const OR_NAME_MAP: Record<string, string> = {
 }
 
 function extractName(item: ListingAmenityItem): string {
-  return (item.label ?? item.name ?? item.title ?? item.value ?? item.key ?? "").trim()
+  return (item.text ?? item.label ?? item.name ?? item.title ?? item.value ?? item.key ?? "").trim()
 }
 
 function mapAmenityName(raw: string): string[] {
@@ -177,28 +187,51 @@ function mapAmenityName(raw: string): string[] {
 
 function parseAmenities(raw: unknown, ownerrezId: string): Set<string> {
   const presentKeys = new Set<string>()
-
-  let items: ListingAmenityItem[] = []
+  const rawTexts: string[] = []
 
   if (Array.isArray(raw)) {
-    items = raw as ListingAmenityItem[]
+    for (const item of raw as ListingAmenityItem[]) {
+      const name = typeof item === "string" ? item : extractName(item)
+      if (name) rawTexts.push(name)
+    }
   } else if (raw !== null && typeof raw === "object") {
     const obj = raw as Record<string, unknown>
+
+    // OwnerRez /v2/listings format: amenity_categories[].amenities[].text
+    if (Array.isArray(obj.amenity_categories)) {
+      for (const cat of obj.amenity_categories as Array<{ amenities?: Array<{ text?: string }> }>) {
+        for (const item of cat.amenities ?? []) {
+          if (item.text) rawTexts.push(item.text)
+        }
+      }
+    }
+
+    // Also mine amenity_call_outs[].text (highlighted amenities)
+    if (Array.isArray(obj.amenity_call_outs)) {
+      for (const item of obj.amenity_call_outs as Array<{ text?: string }>) {
+        if (item.text) rawTexts.push(item.text)
+      }
+    }
+
+    // Fallback: flat array under common field names
     const candidate =
       obj.amenities ?? obj.listing_amenities ?? obj.features ?? obj.items ?? null
-    if (Array.isArray(candidate)) items = candidate as ListingAmenityItem[]
+    if (Array.isArray(candidate)) {
+      for (const item of candidate as ListingAmenityItem[]) {
+        const name = typeof item === "string" ? item : extractName(item)
+        if (name) rawTexts.push(name)
+      }
+    }
   }
 
-  for (const item of items) {
-    const name = typeof item === "string" ? item : extractName(item)
-    if (!name) continue
-    for (const key of mapAmenityName(name)) {
+  for (const text of rawTexts) {
+    for (const key of mapAmenityName(text)) {
       presentKeys.add(key)
     }
   }
 
   console.log(
-    `[amenities-sync] property ${ownerrezId}: found ${items.length} OwnerRez amenities → ` +
+    `[amenities-sync] property ${ownerrezId}: found ${rawTexts.length} amenity texts → ` +
     `matched ${presentKeys.size} internal keys: ${[...presentKeys].join(", ")}`,
   )
 
