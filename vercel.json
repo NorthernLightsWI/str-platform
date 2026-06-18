@@ -15,6 +15,10 @@
     {
       "path": "/api/recommendations/generate",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/reports/monthly",
+      "schedule": "0 8 1 * *"
     }
   ]
 }

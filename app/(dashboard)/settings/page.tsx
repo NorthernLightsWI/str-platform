@@ -41,6 +41,7 @@ export default async function SettingsPage() {
     ownerrez_email     : rawSettings.ownerrez_email     ?? "",
     ownerrez_api_token : rawSettings.ownerrez_api_token ?? "",
     pricelabs_api_key  : rawSettings.pricelabs_api_key  ?? "",
+    report_email       : rawSettings.report_email       ?? "",
   }
 
   const users: UserRow[] = (usersData ?? []).map(u => ({

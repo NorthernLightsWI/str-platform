@@ -201,6 +201,53 @@ export async function deleteUser(userId: string) {
   }
 }
 
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+export async function sendTestReport(): Promise<
+  | { ok: true; emailId: string; recipient: string }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+
+    // Ensure report_email is set before triggering
+    const { data: emailSetting } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "report_email")
+      .single()
+
+    if (!emailSetting?.value) {
+      return { ok: false, error: "Set a report_email address in Reports settings first" }
+    }
+
+    // Call the report API internally (server-side fetch)
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000"
+
+    const secret = process.env.SYNC_SECRET
+    const res = await fetch(`${baseUrl}/api/reports/monthly`, {
+      method : "POST",
+      headers: {
+        "Content-Type" : "application/json",
+        ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+      },
+      cache: "no-store",
+    })
+
+    const json = await res.json()
+    if (!res.ok || json.error) {
+      return { ok: false, error: json.error ?? `HTTP ${res.status}` }
+    }
+
+    return { ok: true, emailId: json.emailId, recipient: json.recipient }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send report" }
+  }
+}
+
 // ── Property visibility ───────────────────────────────────────────────────────
 
 export async function setHiddenProperties(

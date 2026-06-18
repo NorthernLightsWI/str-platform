@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import {
   Eye, EyeOff, Check, X, Loader2, RefreshCw, Plus, Trash2,
-  Plug, Users, Database, Building2,
+  Plug, Users, Database, Building2, Mail, Send,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -11,6 +11,7 @@ import {
   syncOwnerRez,
   syncReviews,
   syncAmenities,
+  sendTestReport,
   testOwnerRezConnection,
   testPriceLabsConnection,
   inviteCleaner,
@@ -24,6 +25,7 @@ export type SettingsData = {
   ownerrez_email     : string
   ownerrez_api_token : string
   pricelabs_api_key  : string
+  report_email       : string
 }
 
 export type UserRow = {
@@ -52,7 +54,7 @@ export type PropertyVisibilityRow = {
   is_active : boolean
 }
 
-type Tab = "integrations" | "users" | "sync" | "visibility"
+type Tab = "integrations" | "users" | "sync" | "visibility" | "reports"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -739,6 +741,110 @@ function PropertyVisibilityTab({
   )
 }
 
+// ── Reports tab ───────────────────────────────────────────────────────────────
+
+function ReportsTab({ initialEmail }: { initialEmail: string }) {
+  const [email,       setEmail]       = useState(initialEmail)
+  const [saving,      startSave]      = useTransition()
+  const [saveResult,  setSaveResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [sending,     setSending]     = useState(false)
+  const [sendResult,  setSendResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  async function handleSend() {
+    setSending(true)
+    setSendResult(null)
+    const res = await sendTestReport()
+    if (!res.ok) {
+      setSendResult({ error: res.error })
+    } else {
+      setSendResult({ ok: true, message: `Report sent to ${res.recipient}` })
+    }
+    setSending(false)
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card title="Email Reports">
+        <p className="text-xs text-muted-foreground">
+          A portfolio optimization report is automatically sent on the 1st of each month at 8 AM UTC.
+          Configure the recipient address and send a test report below.
+        </p>
+
+        <Field label="Report Recipient Email">
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="flex-1 rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+            />
+            <button
+              onClick={() => startSave(async () => {
+                setSaveResult(null)
+                const r = await saveSettings({ report_email: email })
+                setSaveResult(r.error ? r : { ok: true, message: "Saved" })
+              })}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              Save
+            </button>
+          </div>
+          <ActionMsg result={saveResult} />
+        </Field>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Report Contents</p>
+          <ul className="space-y-1.5 text-xs text-muted-foreground">
+            {[
+              "Portfolio summary: total revenue, occupancy, properties needing attention",
+              "Per-property table: revenue vs last month, ADR, occupancy, top recommendation, health score",
+              "Amenity gap callout: top 3 amenities missing across the most properties",
+            ].map(item => (
+              <li key={item} className="flex items-start gap-2">
+                <Check className="size-3 mt-0.5 shrink-0 text-emerald-400" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="border-t border-border pt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleSend}
+            disabled={sending || !email.trim()}
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {sending
+              ? <Loader2 className="size-4 animate-spin" />
+              : <Send className="size-4" />}
+            {sending ? "Sending…" : "Send Test Report"}
+          </button>
+          <ActionMsg result={sendResult} />
+        </div>
+      </Card>
+
+      <Card title="Schedule">
+        <div className="space-y-2">
+          {[
+            { label: "Frequency",  value: "Monthly — 1st of each month" },
+            { label: "Send time",  value: "8:00 AM UTC" },
+            { label: "Data range", value: "Last 30 days vs prior 30 days" },
+            { label: "Provider",   value: "Resend (configure RESEND_API_KEY in Vercel env vars)" },
+          ].map(row => (
+            <div key={row.label} className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{row.label}</span>
+              <span className="text-foreground font-medium text-right">{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function SettingsClient({
@@ -761,6 +867,7 @@ export function SettingsClient({
     { value: "users",        label: "Users",         icon: Users     },
     { value: "sync",         label: "Data Sync",     icon: Database  },
     { value: "visibility",   label: "Visibility",    icon: Building2 },
+    { value: "reports",      label: "Reports",       icon: Mail      },
   ]
 
   return (
@@ -797,6 +904,7 @@ export function SettingsClient({
           initialHiddenIds={hiddenIds}
         />
       )}
+      {tab === "reports"      && <ReportsTab initialEmail={settings.report_email} />}
     </div>
   )
 }
