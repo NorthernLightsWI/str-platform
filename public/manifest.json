@@ -1,0 +1,37 @@
+{
+  "name": "FCCH Manager",
+  "short_name": "FCCH",
+  "description": "Fox Cities Corporate Housing — short-term rental management",
+  "theme_color": "#0A0D10",
+  "background_color": "#0A0D10",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/operations/property-overview",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Property Overview",
+      "url": "/operations/property-overview",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Cleaner Dashboard",
+      "url": "/operations/cleaner-dashboard",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

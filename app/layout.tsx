@@ -17,6 +17,19 @@ const montserrat = Montserrat({
 export const metadata: Metadata = {
   title: "Fox Cities Corporate Housing",
   description: "Unified short-term rental management",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FCCH Manager",
+  },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32", type: "image/x-icon" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
