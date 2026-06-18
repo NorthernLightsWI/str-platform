@@ -6,10 +6,16 @@ import { ListingAuditClient } from "@/components/listing-audit/listing-audit-cli
 export default async function ListingAuditPage() {
   const admin = createAdminClient() as any
 
-  const [{ data: propData }, { data: reviewData }, hiddenIds] = await Promise.all([
+  const [
+    { data: propData,   error: propErr   },
+    { data: reviewData, error: reviewErr },
+    hiddenIds,
+  ] = await Promise.all([
+    // photo_count omitted — column added by migration 20260617000001 which may
+    // not yet be applied; scoring falls back gracefully when passed null
     admin
       .from("properties")
-      .select("id, external_name, internal_name, description, thumbnail_url, photo_count, is_active")
+      .select("id, external_name, internal_name, description, thumbnail_url, is_active")
       .eq("is_active", true)
       .order("external_name"),
 
@@ -19,6 +25,9 @@ export default async function ListingAuditPage() {
 
     getHiddenPropertyIds(),
   ])
+
+  if (propErr)   console.error("[listing-audit] properties query error:", propErr)
+  if (reviewErr) console.error("[listing-audit] reviews query error:",    reviewErr)
 
   // Pre-aggregate reviews per property
   const reviewMap = new Map<string, { total: number; ratedCount: number; reviewCount: number }>()
@@ -39,7 +48,6 @@ export default async function ListingAuditPage() {
     internal_name: string | null
     description  : string | null
     thumbnail_url: string | null
-    photo_count  : number | null
     is_active    : boolean
   }
 
@@ -53,7 +61,7 @@ export default async function ListingAuditPage() {
         title        : p.external_name,
         description  : p.description,
         thumbnail_url: p.thumbnail_url,
-        photo_count  : p.photo_count ?? null,
+        photo_count  : null,  // populated after migration 20260617000001 is applied
         reviewCount  : rws?.reviewCount ?? 0,
         avgRating    : rws && rws.ratedCount > 0 ? rws.total / rws.ratedCount : 0,
       }
