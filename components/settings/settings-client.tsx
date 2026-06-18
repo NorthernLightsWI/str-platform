@@ -10,6 +10,7 @@ import {
   saveSettings,
   syncOwnerRez,
   syncReviews,
+  syncAmenities,
   testOwnerRezConnection,
   testPriceLabsConnection,
   inviteCleaner,
@@ -470,8 +471,10 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
   const [log,            setLog]            = useState(initialLog)
   const [syncing,        setSyncing]        = useState(false)
   const [result,         setResult]         = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
-  const [syncingReviews, setSyncingReviews] = useState(false)
-  const [reviewsResult,  setReviewsResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [syncingReviews,   setSyncingReviews]   = useState(false)
+  const [reviewsResult,    setReviewsResult]    = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [syncingAmenities, setSyncingAmenities] = useState(false)
+  const [amenitiesResult,  setAmenitiesResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
   async function handleSync() {
     setSyncing(true)
@@ -527,6 +530,33 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
     setSyncingReviews(false)
   }
 
+  async function handleSyncAmenities() {
+    setSyncingAmenities(true)
+    setAmenitiesResult(null)
+    const data = await syncAmenities()
+    if (!data.ok) {
+      setAmenitiesResult({ error: data.error })
+    } else {
+      setAmenitiesResult({
+        ok: true,
+        message: `Synced ${data.amenitiesSynced} amenities across ${data.propertiesSynced} properties`,
+      })
+      const newEntry: SyncLogRow = {
+        id             : crypto.randomUUID(),
+        sync_type      : "amenities",
+        status         : "success",
+        records_synced : data.amenitiesSynced,
+        records_failed : 0,
+        error_message  : null,
+        started_at     : new Date().toISOString(),
+        completed_at   : new Date().toISOString(),
+        created_at     : new Date().toISOString(),
+      }
+      setLog(prev => [newEntry, ...prev].slice(0, 10))
+    }
+    setSyncingAmenities(false)
+  }
+
   return (
     <div className="space-y-4">
       <Card title="OwnerRez">
@@ -555,6 +585,19 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
             {syncingReviews ? "Syncing Reviews…" : "Sync Reviews"}
           </button>
           <ActionMsg result={reviewsResult} />
+        </div>
+        <div className="border-t border-border pt-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleSyncAmenities}
+            disabled={syncingAmenities}
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {syncingAmenities
+              ? <Loader2 className="size-4 animate-spin" />
+              : <RefreshCw className="size-4" />}
+            {syncingAmenities ? "Syncing Amenities…" : "Sync Amenities"}
+          </button>
+          <ActionMsg result={amenitiesResult} />
         </div>
       </Card>
 

@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { runOwnerRezSync } from "@/lib/sync/ownerrez"
-import { runReviewsSync } from "@/lib/sync/reviews"
+import { runOwnerRezSync }   from "@/lib/sync/ownerrez"
+import { runReviewsSync }    from "@/lib/sync/reviews"
+import { runAmenitiesSync }  from "@/lib/sync/amenities"
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -78,6 +79,23 @@ export async function syncReviews(): Promise<
     return { ok: true, ...result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Reviews sync failed" }
+  }
+}
+
+// ── Amenities sync ────────────────────────────────────────────────────────────
+
+export async function syncAmenities(): Promise<
+  | { ok: true; propertiesSynced: number; amenitiesSynced: number }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const result = await runAmenitiesSync()
+    revalidatePath("/amenity-gap")
+    revalidatePath("/settings")
+    return { ok: true, ...result }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Amenities sync failed" }
   }
 }
 
