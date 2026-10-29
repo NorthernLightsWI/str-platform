@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeHealthScore, type HealthInput } from "@/lib/health-score"
+import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ export default async function PropertiesPage() {
   ] = await Promise.all([
     supabase
       .from("properties")
-      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active")
+      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, parent_property_id")
       .order("external_name"),
 
     // Trailing 12 months — used for both MTD metrics and health score
@@ -71,8 +72,14 @@ export default async function PropertiesPage() {
     getHiddenPropertyIds(),
   ])
 
-  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
-  const bookings   = bkData ?? []
+  const allProperties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const groups        = buildPropertyGroups(allProperties)
+  const cids          = childIdSet(groups)
+  const parentNameMap = new Map(groups.flatMap(g =>
+    g.children.map(c => [c.id, g.parent.internal_name || g.parent.external_name])
+  ))
+  const properties    = allProperties
+  const bookings      = bkData ?? []
 
   // ── Pre-aggregate health score inputs ─────────────────────────────────────
 
@@ -154,6 +161,7 @@ export default async function PropertiesPage() {
       bathrooms    : p.bathrooms,
       max_guests   : p.max_guests,
       is_active    : p.is_active,
+      parentName   : parentNameMap.get(p.id) ?? null,
       mtdRevenue   : Math.round(mtdRevenue),
       mtdOccupancy : +mtdOccupancy.toFixed(2),
       mtdAdr       : Math.round(mtdAdr),

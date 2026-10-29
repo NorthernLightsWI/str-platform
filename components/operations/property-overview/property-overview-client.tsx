@@ -19,6 +19,7 @@ export type CardData = {
   city           : string | null
   state          : string | null
   status         : PropertyStatus
+  listingCount   : number | null  // >1 when this card represents a grouped unit
   currentGuest   : string | null
   currentArrival : string | null
   currentDepart  : string | null
@@ -99,7 +100,14 @@ function PropertyCard({ card }: { card: CardData }) {
     )}>
       <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-3">
         <div className="min-w-0">
-          <p className="font-semibold text-foreground leading-tight truncate">{card.name}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="font-semibold text-foreground leading-tight truncate">{card.name}</p>
+            {card.listingCount && (
+              <span className="shrink-0 inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {card.listingCount} listings
+              </span>
+            )}
+          </div>
           {card.name !== card.externalName && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{card.externalName}</p>
           )}

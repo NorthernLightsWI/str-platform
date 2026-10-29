@@ -1,5 +1,6 @@
 import { createClient }      from "@/lib/supabase/server"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
+import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 import {
   PropertyOverviewClient,
   type CardData,
@@ -39,7 +40,7 @@ export default async function PropertyOverviewPage() {
   const [{ data: propData }, { data: bkData }, { data: cleanData }, hiddenIds] = await Promise.all([
     supabase
       .from("properties")
-      .select("id, external_name, internal_name, city, state")
+      .select("id, external_name, internal_name, city, state, parent_property_id")
       .eq("is_active", true)
       .order("external_name"),
 
@@ -72,9 +73,21 @@ export default async function PropertyOverviewPage() {
     cleanByProp.set(c.property_id, c)
   }
 
-  // Compute cards
-  const cards: CardData[] = properties.map(p => {
-    const pb = bookings.filter(b => b.property_id === p.id)
+  // Build groups so children can be merged into parent cards
+  const groups   = buildPropertyGroups(properties)
+  const childIds = childIdSet(groups)
+
+  // Compute status for a single property ID
+  function computeStatus(
+    propId: string,
+  ): {
+    status        : PropertyStatus
+    current       : (typeof bookings)[number] | null
+    lastBooking   : (typeof bookings)[number] | null
+    nextBooking   : (typeof bookings)[number] | null
+    checkoutHrs   : number | null
+  } {
+    const pb = bookings.filter(b => b.property_id === propId)
 
     const current = pb.find(b => b.arrival <= todayStr && b.departure > todayStr) ?? null
 
@@ -88,7 +101,7 @@ export default async function PropertyOverviewPage() {
       .sort((a, b) => a.arrival.localeCompare(b.arrival))
     const nextBooking = future[0] ?? null
 
-    const lastClean = cleanByProp.get(p.id) ?? null
+    const lastClean = cleanByProp.get(propId) ?? null
 
     let status: PropertyStatus
     if (current) {
@@ -112,25 +125,47 @@ export default async function PropertyOverviewPage() {
     const checkoutAt  = lastBooking ? new Date(lastBooking.departure + "T11:00:00Z") : null
     const checkoutHrs = checkoutAt ? (today.getTime() - checkoutAt.getTime()) / 3_600_000 : null
 
-    return {
-      id             : p.id,
-      name           : p.internal_name || p.external_name,
-      externalName   : p.external_name,
-      city           : p.city,
-      state          : p.state,
-      status,
-      currentGuest   : current?.guest_name   ?? null,
-      currentArrival : current?.arrival      ?? null,
-      currentDepart  : current?.departure    ?? null,
-      nightsLeft     : current ? daysBetween(todayStr, current.departure) : null,
-      checkoutHrsAgo : status === "needs_cleaning" ? checkoutHrs : null,
-      lastBookingId  : lastBooking?.id ?? null,
-      nextGuest      : nextBooking?.guest_name ?? null,
-      nextArrival    : nextBooking?.arrival    ?? null,
-      daysUntil      : nextBooking ? daysBetween(todayStr, nextBooking.arrival) : null,
-      nextNights     : nextBooking ? daysBetween(nextBooking.arrival, nextBooking.departure) : null,
-    }
-  })
+    return { status, current, lastBooking, nextBooking, checkoutHrs }
+  }
+
+  // Compute cards — skip children (they're merged into parent cards)
+  const cards: CardData[] = properties
+    .filter(p => !childIds.has(p.id))
+    .map(p => {
+      const group      = groups.find(g => g.parent.id === p.id)
+      const memberIds  = group ? group.allIds : [p.id]
+      const listingCnt = memberIds.length
+
+      // Compute status for each member; take the worst across all
+      const memberStates = memberIds.map(id => computeStatus(id))
+
+      // Worst-status wins: needs_cleaning > occupied > clean > vacant
+      const worstState = memberStates.reduce((best, cur) =>
+        STATUS_ORDER[cur.status] < STATUS_ORDER[best.status] ? cur : best
+      )
+
+      const { status, current, lastBooking, nextBooking, checkoutHrs } = worstState
+
+      return {
+        id             : p.id,
+        name           : p.internal_name || p.external_name,
+        externalName   : p.external_name,
+        city           : p.city,
+        state          : p.state,
+        status,
+        listingCount   : listingCnt > 1 ? listingCnt : null,
+        currentGuest   : current?.guest_name   ?? null,
+        currentArrival : current?.arrival      ?? null,
+        currentDepart  : current?.departure    ?? null,
+        nightsLeft     : current ? daysBetween(todayStr, current.departure) : null,
+        checkoutHrsAgo : status === "needs_cleaning" ? checkoutHrs : null,
+        lastBookingId  : lastBooking?.id ?? null,
+        nextGuest      : nextBooking?.guest_name ?? null,
+        nextArrival    : nextBooking?.arrival    ?? null,
+        daysUntil      : nextBooking ? daysBetween(todayStr, nextBooking.arrival) : null,
+        nextNights     : nextBooking ? daysBetween(nextBooking.arrival, nextBooking.departure) : null,
+      }
+    })
 
   cards.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
 

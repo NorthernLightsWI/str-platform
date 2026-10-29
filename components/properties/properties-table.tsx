@@ -16,6 +16,7 @@ export type PropertyRow = {
   bathrooms    : number | null
   max_guests   : number | null
   is_active    : boolean
+  parentName   : string | null  // non-null when this is a child/grouped listing
   mtdRevenue   : number
   mtdOccupancy : number   // 0–100
   mtdAdr       : number
@@ -172,6 +173,11 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
                     {row.internal_name && row.external_name !== row.internal_name && (
                       <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[220px]">
                         {row.external_name}
+                      </p>
+                    )}
+                    {row.parentName && (
+                      <p className="text-[10px] text-blue-400 mt-0.5 truncate max-w-[220px]">
+                        ↳ {row.parentName}
                       </p>
                     )}
                   </td>

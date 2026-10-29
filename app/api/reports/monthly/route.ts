@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { Resend } from "resend"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { parseHiddenIds }    from "@/lib/hidden-properties"
+import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 import {
   buildMonthlyEmailHtml,
   computeAmenityGaps,
@@ -55,7 +56,7 @@ async function generateAndSendReport(): Promise<NextResponse> {
     { data: amenityRows },
   ] = await Promise.all([
     supabase.from("app_settings").select("key, value"),
-    (supabase as any).from("properties").select("id, internal_name, external_name").eq("is_active", true),
+    (supabase as any).from("properties").select("id, internal_name, external_name, parent_property_id").eq("is_active", true),
     (supabase as any).from("bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.start)
@@ -99,8 +100,16 @@ async function generateAndSendReport(): Promise<NextResponse> {
   }
 
   // ── Build per-property stats ──────────────────────────────────────────────
-  const props       = ((properties ?? []) as Array<{ id: string; internal_name: string; external_name: string }>)
+  const allProps    = ((properties ?? []) as Array<{ id: string; internal_name: string; external_name: string; parent_property_id: string | null }>)
     .filter(p => !hiddenIds.has(p.id))
+  const groups      = buildPropertyGroups(allProps)
+  const cids        = childIdSet(groups)
+  // Build map: child ID → [all sibling IDs including self and parent]
+  const groupAllIds = new Map<string, string[]>(groups.flatMap(g => g.allIds.map(id => [id, g.allIds])))
+
+  // Report shows only root-level properties (children are absorbed)
+  const props = allProps.filter(p => !cids.has(p.id))
+
   const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; total_amount: number | null }>
   const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; total_amount: number | null }>
   const reviewList  = (reviews ?? [])     as Array<{ property_id: string; overall_rating: number }>
@@ -108,8 +117,10 @@ async function generateAndSendReport(): Promise<NextResponse> {
   const amenities   = (amenityRows ?? []) as Array<{ property_id: string; amenity_key: string; is_present: boolean }>
 
   const propertyRows: PropertyReportRow[] = props.map(p => {
-    const myCurr = currBook.filter(b => b.property_id === p.id)
-    const myPrev = prevBook.filter(b => b.property_id === p.id)
+    // For groups, aggregate bookings from all member IDs
+    const ids    = groupAllIds.get(p.id) ?? [p.id]
+    const myCurr = currBook.filter(b => ids.includes(b.property_id))
+    const myPrev = prevBook.filter(b => ids.includes(b.property_id))
 
     const revenue     = myCurr.reduce((s, b) => s + (b.total_amount ?? 0), 0)
     const revenuePrev = myPrev.reduce((s, b) => s + (b.total_amount ?? 0), 0)
@@ -125,15 +136,15 @@ async function generateAndSendReport(): Promise<NextResponse> {
     const occupancy  = Math.min(100, Math.round((bookedNights / 30) * 100))
     const adr        = bookedNights > 0 ? revenue / bookedNights : 0
 
-    // Reviews: average rating for this property
-    const propReviews = reviewList.filter(r => r.property_id === p.id)
+    // Reviews: average rating across all group members
+    const propReviews = reviewList.filter(r => ids.includes(r.property_id))
     const avgRating   = propReviews.length
       ? propReviews.reduce((s, r) => s + (r.overall_rating ?? 0), 0) / propReviews.length
       : null
 
-    // Top recommendation: highest-priority open rec
+    // Top recommendation: highest-priority open rec across all group members
     const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
-    const propRecs    = recList.filter(r => r.property_id === p.id)
+    const propRecs    = recList.filter(r => ids.includes(r.property_id))
     const topRec      = propRecs.length
       ? [...propRecs].sort((a, b) =>
           (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)

@@ -9,6 +9,7 @@ import {
   type RecItem,
   type BookingItem,
   type TaskItem,
+  type SiblingItem,
 } from "@/components/properties/property-detail-client"
 
 function addDays(d: Date, n: number) {
@@ -42,7 +43,7 @@ export default async function PropertyDetailPage({
   ] = await Promise.all([
     admin
       .from("properties")
-      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address")
+      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address, parent_property_id")
       .eq("id", id)
       .single(),
 
@@ -99,6 +100,23 @@ export default async function PropertyDetailPage({
   ])
 
   if (!property) notFound()
+
+  // ── Siblings (other listings in the same group) ───────────────────────────
+
+  let siblings: SiblingItem[] = []
+  const rootId = property.parent_property_id ?? property.id
+
+  // Fetch all properties that share this root (parent or children of the same parent)
+  const { data: relatedData } = await admin
+    .from("properties")
+    .select("id, external_name, internal_name")
+    .or(`id.eq.${rootId},parent_property_id.eq.${rootId}`)
+
+  if (relatedData && relatedData.length > 1) {
+    siblings = relatedData
+      .filter(r => r.id !== id)
+      .map(r => ({ id: r.id, name: r.internal_name || r.external_name }))
+  }
 
   // ── Health score ──────────────────────────────────────────────────────────
 
@@ -201,6 +219,7 @@ export default async function PropertyDetailPage({
       recommendations={recs}
       recentBookings={recentBookings}
       tasks={tasks}
+      siblings={siblings}
     />
   )
 }

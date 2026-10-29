@@ -637,6 +637,7 @@ export type Database = {
           max_guests: number | null
           owner_id: string
           ownerrez_id: string | null
+          parent_property_id: string | null
           public_url: string | null
           square_feet: number | null
           state: string | null
@@ -659,6 +660,7 @@ export type Database = {
           max_guests?: number | null
           owner_id: string
           ownerrez_id?: string | null
+          parent_property_id?: string | null
           public_url?: string | null
           square_feet?: number | null
           state?: string | null
@@ -681,6 +683,7 @@ export type Database = {
           max_guests?: number | null
           owner_id?: string
           ownerrez_id?: string | null
+          parent_property_id?: string | null
           public_url?: string | null
           square_feet?: number | null
           state?: string | null

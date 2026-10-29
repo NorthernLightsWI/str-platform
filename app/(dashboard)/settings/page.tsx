@@ -7,6 +7,7 @@ import {
   type UserRow,
   type SyncLogRow,
   type PropertyVisibilityRow,
+  type PropertyGroupRow,
 } from "@/components/settings/settings-client"
 
 function parseSettingValue(raw: unknown): string {
@@ -29,7 +30,7 @@ export default async function SettingsPage() {
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
-    admin.from("properties").select("id, external_name, internal_name, is_active").order("external_name"),
+    admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -70,6 +71,13 @@ export default async function SettingsPage() {
     is_active : p.is_active ?? false,
   }))
 
+  const groupProperties: PropertyGroupRow[] = (propData ?? []).map(p => ({
+    id                 : p.id,
+    name               : p.internal_name || p.external_name,
+    is_active          : p.is_active ?? false,
+    parent_property_id : p.parent_property_id ?? null,
+  }))
+
   let hiddenIds: string[] = []
   try {
     const raw = rawSettings.hidden_properties
@@ -91,6 +99,7 @@ export default async function SettingsPage() {
         syncLog={syncLog}
         properties={properties}
         hiddenIds={hiddenIds}
+        groupProperties={groupProperties}
       />
     </div>
   )

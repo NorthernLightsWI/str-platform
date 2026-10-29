@@ -246,6 +246,42 @@ export async function sendTestReport(): Promise<
   }
 }
 
+// ── Property groups ───────────────────────────────────────────────────────────
+
+export async function setPropertyParent(
+  propertyId: string,
+  parentId  : string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+
+    // Validate: the chosen parent must not itself be a child
+    if (parentId) {
+      const { data: parent } = await admin
+        .from("properties")
+        .select("parent_property_id")
+        .eq("id", parentId)
+        .single()
+      if (parent?.parent_property_id) {
+        return { ok: false, error: "Cannot nest groups more than one level deep" }
+      }
+    }
+
+    const { error } = await admin
+      .from("properties")
+      .update({ parent_property_id: parentId })
+      .eq("id", propertyId)
+    if (error) return { ok: false, error: error.message }
+    revalidatePath("/settings")
+    revalidatePath("/properties")
+    revalidatePath("/overview")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to save" }
+  }
+}
+
 // ── Property visibility ───────────────────────────────────────────────────────
 
 export async function setHiddenProperties(

@@ -5,6 +5,7 @@ import {
   type PropertyRaw,
 } from "@/components/analytics/analytics-client"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
+import { buildPropertyGroups, mergeChildBookings, childIdSet } from "@/lib/property-groups"
 
 export default async function AnalyticsPage() {
   const admin = createAdminClient()
@@ -27,13 +28,17 @@ export default async function AnalyticsPage() {
 
     admin
       .from("properties")
-      .select("id, internal_name, external_name")
+      .select("id, internal_name, external_name, parent_property_id")
       .eq("is_active", true),
 
     getHiddenPropertyIds(),
   ])
 
-  const bookings: BookingRaw[] = (bookingData ?? [])
+  const allProps = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const groups   = buildPropertyGroups(allProps)
+  const cids     = childIdSet(groups)
+
+  const rawBookings: BookingRaw[] = (bookingData ?? [])
     .filter(b => !hiddenIds.has(b.property_id))
     .map(b => ({
       arrival      : b.arrival,
@@ -44,8 +49,12 @@ export default async function AnalyticsPage() {
       property_id  : b.property_id,
     }))
 
-  const properties: PropertyRaw[] = (propData ?? [])
-    .filter(p => !hiddenIds.has(p.id))
+  // Remap child bookings to parent so analytics aggregates correctly
+  const bookings = mergeChildBookings(rawBookings, groups)
+
+  // Remove child properties from the property list (absorbed into parent)
+  const properties: PropertyRaw[] = allProps
+    .filter(p => !cids.has(p.id))
     .map(p => ({
       id  : p.id,
       name: p.internal_name || p.external_name,

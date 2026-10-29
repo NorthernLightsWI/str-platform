@@ -6,6 +6,7 @@ import { RevenueChart, type RevenueDataPoint   } from "@/components/overview/rev
 import { OccupancyChart, type OccupancyDataPoint } from "@/components/overview/occupancy-chart"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeHealthScore, healthColor, type HealthInput } from "@/lib/health-score"
+import { buildPropertyGroups, mergeChildBookings, childIdSet } from "@/lib/property-groups"
 import { cn } from "@/lib/utils"
 
 // ── Date helpers (UTC-safe, no external deps) ─────────────────────────────────
@@ -219,7 +220,7 @@ export default async function OverviewPage() {
   ] = await Promise.all([
     supabase
       .from("properties")
-      .select("id, external_name, internal_name, is_active"),
+      .select("id, external_name, internal_name, is_active, parent_property_id"),
 
     supabase
       .from("bookings")
@@ -255,9 +256,15 @@ export default async function OverviewPage() {
   ])
 
   const properties : PropertyRow[] = (propData ?? []) as PropertyRow[]
-  const bookings   : BookingRow[]  = (bkData   ?? []) as BookingRow[]
+  const rawBookings: BookingRow[]  = (bkData   ?? []) as BookingRow[]
 
-  const activeProps  = properties.filter(p => p.is_active && !hiddenIds.has(p.id))
+  const allActive = properties.filter(p => p.is_active && !hiddenIds.has(p.id))
+  const groups    = buildPropertyGroups(allActive as (PropertyRow & { parent_property_id?: string | null })[])
+  const cids      = childIdSet(groups)
+  const bookings  = mergeChildBookings(rawBookings, groups)
+
+  // Active properties for KPI counts use root-level (non-child) properties only
+  const activeProps  = allActive.filter(p => !cids.has(p.id))
   const activeCount  = activeProps.length
 
   // ── Health score inputs ───────────────────────────────────────────────────
@@ -284,7 +291,16 @@ export default async function OverviewPage() {
 
   type HealthRow = { id: string; name: string; healthScore: number; mtdRevenue: number; mtdOccupancy: number }
 
+  // For grouped properties, aggregate auxiliary data (reviews, cleaning, maintenance)
+  // across all member IDs.
+  function memberIds(propId: string): string[] {
+    const g = groups.find(g => g.parent.id === propId)
+    return g ? g.allIds : [propId]
+  }
+
   const healthRows: HealthRow[] = activeProps.map(p => {
+    const mids = memberIds(p.id)
+
     const pbMTD = bookings.filter(b => {
       if (b.status === "cancelled") return false
       const a = new Date(b.arrival + "T00:00:00Z")
@@ -308,14 +324,26 @@ export default async function OverviewPage() {
     const occ12m = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
     const adr12m = nights12m > 0 ? rev12m / nights12m : 0
 
-    const rws = reviewMap.get(p.id)
+    // Aggregate reviews/cleaning/maint across all member IDs
+    let totalRating = 0, ratedCount = 0, reviewCount = 0
+    for (const mid of mids) {
+      const rws = reviewMap.get(mid)
+      if (rws) {
+        totalRating  += rws.ratingTotal
+        ratedCount   += rws.ratedCount
+        reviewCount  += rws.reviewCount
+      }
+    }
+    const hasClean = mids.some(mid => recentCleanSet.has(mid))
+    const maintCnt = mids.reduce((s, mid) => s + (maintCountMap.get(mid) ?? 0), 0)
+
     const input: HealthInput = {
       occupancy12m          : occ12m,
       adr12m,
-      reviewCount           : rws?.reviewCount ?? 0,
-      avgRating             : rws && rws.ratedCount > 0 ? rws.ratingTotal / rws.ratedCount : 0,
-      hasRecentCleaning     : recentCleanSet.has(p.id),
-      openHighPriorityIssues: maintCountMap.get(p.id) ?? 0,
+      reviewCount,
+      avgRating             : ratedCount > 0 ? totalRating / ratedCount : 0,
+      hasRecentCleaning     : hasClean,
+      openHighPriorityIssues: maintCnt,
     }
     const hs = computeHealthScore(input)
 

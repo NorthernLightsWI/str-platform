@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import {
   ArrowLeft, TrendingUp, Star, Wrench, ClipboardList, CheckCircle2,
   Circle, Clock, Trash2, Plus, Loader2, ChevronRight, AlertTriangle,
@@ -66,6 +67,11 @@ export type TaskItem = {
   due_date                : string | null
   recommendation_id       : string | null
   created_at              : string
+}
+
+export type SiblingItem = {
+  id  : string
+  name: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -656,6 +662,7 @@ export function PropertyDetailClient({
   recommendations,
   recentBookings,
   tasks: initialTasks,
+  siblings = [],
 }: {
   property       : PropertyDetail
   healthScore    : HealthScore
@@ -663,6 +670,7 @@ export function PropertyDetailClient({
   recommendations: RecItem[]
   recentBookings : BookingItem[]
   tasks          : TaskItem[]
+  siblings       ?: SiblingItem[]
 }) {
   const router = useRouter()
   const [modal,         setModal]         = useState<ModalState>(CLOSED_MODAL)
@@ -731,6 +739,21 @@ export function PropertyDetailClient({
             </p>
             {property.externalName !== property.name && (
               <p className="text-xs text-muted-foreground mt-0.5 truncate">{property.externalName}</p>
+            )}
+            {siblings.length > 0 && (
+              <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+                <span className="text-xs text-muted-foreground">Also listed as:</span>
+                {siblings.map(s => (
+                  <Link
+                    key={s.id}
+                    href={`/properties/${s.id}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 transition-colors"
+                  >
+                    {s.name}
+                    <ChevronRight className="size-3" />
+                  </Link>
+                ))}
+              </div>
             )}
           </div>
         </div>
