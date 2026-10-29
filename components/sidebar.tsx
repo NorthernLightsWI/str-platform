@@ -26,6 +26,7 @@ import {
   LogOut,
   Eye,
   EyeOff,
+  Calendar,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { logout } from "@/app/actions/auth"
@@ -51,6 +52,7 @@ const ADMIN_ITEMS: NavItem[] = [
 ]
 
 const OPS_ITEMS: NavItem[] = [
+  { label: "Calendar",          href: "/calendar",                     icon: Calendar      },
   { label: "Property Overview", href: "/operations/property-overview", icon: MapPin        },
   { label: "Cleaner Dashboard", href: "/operations/cleaner-dashboard", icon: Sparkles      },
   { label: "Cleaning History",  href: "/operations/cleaning-history",  icon: ClipboardList },
