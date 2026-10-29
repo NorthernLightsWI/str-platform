@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { parseHiddenIds }    from "@/lib/hidden-properties"
 import {
   buildMonthlyEmailHtml,
   computeAmenityGaps,
@@ -90,13 +91,16 @@ async function generateAndSendReport(): Promise<NextResponse> {
     return NextResponse.json({ error: "report_email not set in app_settings" }, { status: 400 })
   }
 
+  const hiddenIds = parseHiddenIds(settingsRows?.find(r => r.key === "hidden_properties")?.value)
+
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey || resendKey.startsWith("re_placeholder")) {
     return NextResponse.json({ error: "RESEND_API_KEY not configured" }, { status: 400 })
   }
 
   // ── Build per-property stats ──────────────────────────────────────────────
-  const props       = (properties ?? []) as Array<{ id: string; internal_name: string; external_name: string }>
+  const props       = ((properties ?? []) as Array<{ id: string; internal_name: string; external_name: string }>)
+    .filter(p => !hiddenIds.has(p.id))
   const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; total_amount: number | null }>
   const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; total_amount: number | null }>
   const reviewList  = (reviews ?? [])     as Array<{ property_id: string; overall_rating: number }>
