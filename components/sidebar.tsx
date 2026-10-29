@@ -24,6 +24,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { logout } from "@/app/actions/auth"
@@ -108,13 +110,22 @@ function SectionDivider({ label, collapsed }: { label: string; collapsed: boolea
 }
 
 interface SidebarProps {
-  userName       : string
-  role           : string
-  mobileOpen?    : boolean
-  onMobileClose? : () => void
+  userName         : string
+  role             : string
+  mobileOpen?      : boolean
+  onMobileClose?   : () => void
+  cleanerPreview?  : boolean
+  onTogglePreview? : () => void
 }
 
-export function Sidebar({ userName, role, mobileOpen = false, onMobileClose }: SidebarProps) {
+export function Sidebar({
+  userName,
+  role,
+  mobileOpen      = false,
+  onMobileClose,
+  cleanerPreview  = false,
+  onTogglePreview,
+}: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const isAdmin       = role === "admin"
   const isMaintenance = role === "maintenance"
@@ -161,6 +172,11 @@ export function Sidebar({ userName, role, mobileOpen = false, onMobileClose }: S
           MAINTENANCE_ITEMS.map((item) => (
             <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
           ))
+        ) : cleanerPreview ? (
+          // Cleaner preview: ops items only, no admin links, no settings
+          OPS_ITEMS.map((item) => (
+            <NavLink key={item.href} item={item} collapsed={collapsed} onClose={onMobileClose} />
+          ))
         ) : (
           <>
             {isAdmin && (
@@ -189,6 +205,28 @@ export function Sidebar({ userName, role, mobileOpen = false, onMobileClose }: S
 
       {/* User footer */}
       <div className="shrink-0 border-t border-sidebar-border p-3 space-y-1">
+        {/* View as Cleaner toggle — admins only */}
+        {isAdmin && onTogglePreview && (
+          <button
+            onClick={onTogglePreview}
+            title={collapsed ? (cleanerPreview ? "Exit Cleaner Preview" : "View as Cleaner") : undefined}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors",
+              collapsed && "justify-center px-2",
+              cleanerPreview
+                ? "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
+                : "text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            )}
+          >
+            {cleanerPreview
+              ? <EyeOff className="size-3.5 shrink-0" />
+              : <Eye    className="size-3.5 shrink-0" />}
+            {!collapsed && (
+              <span>{cleanerPreview ? "Exit Cleaner Preview" : "View as Cleaner"}</span>
+            )}
+          </button>
+        )}
+
         <div className={cn("flex items-center gap-2.5", collapsed && "justify-center")}>
           {/* Avatar */}
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground text-xs font-semibold">
