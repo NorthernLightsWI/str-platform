@@ -164,7 +164,7 @@ export function TaskCard(props: TaskCardProps) {
       <div className="px-4 pb-3">
         <button
           onClick={() => setNotesOpen(o => !o)}
-          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <MessageSquare className="size-3.5 shrink-0" />
           Notes
@@ -204,7 +204,7 @@ export function TaskCard(props: TaskCardProps) {
         <button
           disabled={cleanPending}
           onClick={handleMarkClean}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500/15 px-3 py-3 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {cleanPending
             ? <Loader2 className="size-4 animate-spin" />

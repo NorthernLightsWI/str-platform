@@ -477,7 +477,7 @@ function AccessEntrySection({
           /* ── Edit mode ── */
           <div className="space-y-4">
             {/* Photo + lockbox location side-by-side */}
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-4">
               <PhotoBlock />
               <div className="flex-1 min-w-0">
                 <TextArea

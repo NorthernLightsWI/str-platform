@@ -55,7 +55,7 @@ export function MaintenanceClient({
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                "flex items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
+                "flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium transition-colors",
                 tab === t
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",

@@ -105,7 +105,7 @@ export function IssueCard({ issue }: { issue: IssueData }) {
               onChange={e => handleStatusChange(e.target.value)}
               disabled={statusPend}
               className={cn(
-                "appearance-none rounded-full border px-2.5 py-0.5 text-xs font-medium pr-5 outline-none cursor-pointer transition-colors",
+                "appearance-none rounded-full border px-2.5 py-2 text-xs font-medium pr-5 outline-none cursor-pointer transition-colors",
                 STATUS_STYLES[status] ?? STATUS_STYLES.open,
                 "border-transparent",
               )}

@@ -586,7 +586,7 @@ export default async function OverviewPage() {
                     <td className="px-4 py-3 text-center">
                       <Link
                         href={`/properties/${row.id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                       >
                         View
                         <ExternalLink className="size-3" />
