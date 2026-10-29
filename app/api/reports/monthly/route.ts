@@ -56,16 +56,16 @@ async function generateAndSendReport(): Promise<NextResponse> {
     supabase.from("app_settings").select("key, value"),
     (supabase as any).from("properties").select("id, internal_name, external_name").eq("is_active", true),
     (supabase as any).from("bookings")
-      .select("property_id, arrival, departure, net_revenue, is_block, status")
+      .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.start)
       .lt("arrival", period.end)
-      .eq("is_block", false)
+      .neq("is_block", true)
       .neq("status", "cancelled"),
     (supabase as any).from("bookings")
-      .select("property_id, arrival, departure, net_revenue, is_block, status")
+      .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.prevStart)
       .lt("arrival", period.prevEnd)
-      .eq("is_block", false)
+      .neq("is_block", true)
       .neq("status", "cancelled"),
     (supabase as any).from("reviews")
       .select("property_id, overall_rating"),
@@ -97,8 +97,8 @@ async function generateAndSendReport(): Promise<NextResponse> {
 
   // ── Build per-property stats ──────────────────────────────────────────────
   const props       = (properties ?? []) as Array<{ id: string; internal_name: string; external_name: string }>
-  const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; net_revenue: number }>
-  const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; net_revenue: number }>
+  const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; total_amount: number | null }>
+  const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; total_amount: number | null }>
   const reviewList  = (reviews ?? [])     as Array<{ property_id: string; overall_rating: number }>
   const recList     = (recs ?? [])        as Array<{ property_id: string; title: string; priority: string }>
   const amenities   = (amenityRows ?? []) as Array<{ property_id: string; amenity_key: string; is_present: boolean }>
@@ -107,8 +107,8 @@ async function generateAndSendReport(): Promise<NextResponse> {
     const myCurr = currBook.filter(b => b.property_id === p.id)
     const myPrev = prevBook.filter(b => b.property_id === p.id)
 
-    const revenue     = myCurr.reduce((s, b) => s + (b.net_revenue ?? 0), 0)
-    const revenuePrev = myPrev.reduce((s, b) => s + (b.net_revenue ?? 0), 0)
+    const revenue     = myCurr.reduce((s, b) => s + (b.total_amount ?? 0), 0)
+    const revenuePrev = myPrev.reduce((s, b) => s + (b.total_amount ?? 0), 0)
 
     // Booked nights = sum of (departure - arrival) per booking, capped at period
     const bookedNights = myCurr.reduce((s, b) => {
