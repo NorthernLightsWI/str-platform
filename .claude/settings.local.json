@@ -38,7 +38,21 @@
       "Bash(git mv *)",
       "Bash(New-Item -ItemType Directory -Force -Path \"C:\\\\Users\\\\tjhal\\\\Desktop\\\\str-platform\\\\app\\\\\\(dashboard\\)\\\\properties\\\\[id]\")",
       "Bash(Out-Null)",
-      "Bash(Write-Output \"dir created\")"
+      "Bash(Write-Output \"dir created\")",
+      "Bash(curl *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('homepage',''\\)\\)\")",
+      "PowerShell(npx vercel ls 2>&1 | Select-Object -First 20)",
+      "Bash(npx vercel *)",
+      "Bash(python3 -c ' *)",
+      "Bash(npm uninstall *)",
+      "Bash(git rm *)",
+      "Bash(npx lighthouse *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(git *)",
+      "PowerShell(npm *)",
+      "Read(//c/Users/tjhal/Desktop/custom-companycam/**)",
+      "Bash(npm outdated *)",
+      "Bash(dir \"C:\\\\Users\\\\tjhal\\\\Desktop\\\\str-platform\" /b)"
     ]
   }
 }

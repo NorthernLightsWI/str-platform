@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   DashboardClient,
   type CleaningTask,
@@ -40,7 +41,7 @@ export default async function CleanerDashboardPage() {
   const wkStart    = weekStart(today)
   const moStart    = monthStart(today)
 
-  const [{ data: propData }, { data: bkData }, { data: cleanData }, { data: inProgressData }] =
+  const [{ data: propData }, { data: bkData }, { data: cleanData }, { data: inProgressData }, hiddenIds] =
     await Promise.all([
       supabase
         .from("properties")
@@ -71,9 +72,11 @@ export default async function CleanerDashboardPage() {
         .select("id, property_id, notes")
         .eq("status", "in_progress")
         .gte("scheduled_date", toYMD(addDays(today, -7))),
+
+      getHiddenPropertyIds(),
     ])
 
-  const properties = propData      ?? []
+  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
   const bookings   = bkData        ?? []
   const cleanings  = cleanData     ?? []
   const inProgress = inProgressData ?? []

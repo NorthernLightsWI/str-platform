@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   MarketIntelClient,
   type PortfolioSummary,
@@ -14,7 +15,7 @@ export default async function MarketIntelPage() {
   const periodStartStr = periodStart.toISOString().slice(0, 10)
   const todayStr       = new Date().toISOString().slice(0, 10)
 
-  const [{ data: propData }, { data: bookingData }] = await Promise.all([
+  const [{ data: propData }, { data: bookingData }, hiddenIds] = await Promise.all([
     admin
       .from("properties")
       .select("id")
@@ -22,18 +23,20 @@ export default async function MarketIntelPage() {
 
     admin
       .from("bookings")
-      .select("arrival, departure, net_revenue, total_amount")
+      .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", periodStartStr)
       .lt("arrival", todayStr),
+
+    getHiddenPropertyIds(),
   ])
 
-  const propCount  = (propData ?? []).length
+  const propCount  = (propData ?? []).filter(p => !hiddenIds.has(p.id)).length
   let   totalBooked  = 0
   let   totalRevenue = 0
 
-  for (const b of bookingData ?? []) {
+  for (const b of (bookingData ?? []).filter(b => !hiddenIds.has(b.property_id))) {
     const arrMs  = new Date(b.arrival   + "T00:00:00").getTime()
     const depMs  = new Date(b.departure + "T00:00:00").getTime()
     const nights = Math.max(0, (depMs - arrMs) / 86_400_000)

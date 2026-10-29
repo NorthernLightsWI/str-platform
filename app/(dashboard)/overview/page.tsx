@@ -230,11 +230,11 @@ export default async function OverviewPage() {
 
     supabase
       .from("bookings")
-      .select("id, guest_name, arrival, departure, total_amount, listing_site, status, properties(external_name)")
+      .select("id, property_id, guest_name, arrival, departure, total_amount, listing_site, status, properties(external_name)")
       .neq("is_block", true)
       .neq("status", "cancelled")
       .order("arrival", { ascending: false })
-      .limit(10),
+      .limit(25),
 
     admin
       .from("reviews")
@@ -405,6 +405,7 @@ export default async function OverviewPage() {
 
   type RecentRow = {
     id           : string
+    property_id  : string
     guest_name   : string | null
     arrival      : string
     departure    : string
@@ -413,7 +414,9 @@ export default async function OverviewPage() {
     status       : string
     properties   : { external_name: string } | null
   }
-  const recentBookings = (recentData ?? []) as RecentRow[]
+  const recentBookings = ((recentData ?? []) as RecentRow[])
+    .filter(b => !hiddenIds.has(b.property_id))
+    .slice(0, 10)
 
   // ── Render ────────────────────────────────────────────────────────────────
 

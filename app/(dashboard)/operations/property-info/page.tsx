@@ -1,5 +1,6 @@
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   PropertyInfoClient,
   type PropertyItemFull,
@@ -21,6 +22,7 @@ export default async function PropertyInfoPage() {
     { data: vendorData },
     { data: recurringData },
     { data: changelogData },
+    hiddenIds,
   ] = await Promise.all([
     supabase
       .from("profiles")
@@ -53,6 +55,8 @@ export default async function PropertyInfoPage() {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(100),
+
+    getHiddenPropertyIds(),
   ])
 
   const role    = profile?.role ?? "admin"
@@ -63,7 +67,7 @@ export default async function PropertyInfoPage() {
   const recurring  = ((recurringData as any[] | null) ?? []) as RecurringItem[]
   const changelog  = ((changelogData as any[] | null) ?? []) as ChangelogEntry[]
 
-  const properties: PropertyItemFull[] = (propData ?? []).map(p => ({
+  const properties: PropertyItemFull[] = (propData ?? []).filter(p => !hiddenIds.has(p.id)).map(p => ({
     id          : p.id,
     name        : p.internal_name || p.external_name,
     externalName: p.external_name,
