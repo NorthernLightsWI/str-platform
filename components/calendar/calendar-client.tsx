@@ -371,11 +371,9 @@ export function CalendarClient({ year, month, bookings, properties }: Props) {
                       seg.isEnd   && "rounded-r-sm",
                     )}
                   >
-                    {seg.isStart && (
-                      <span className="truncate text-[10px] font-medium text-white/95 leading-none whitespace-nowrap px-1.5">
-                        {seg.label}
-                      </span>
-                    )}
+                    <span className="truncate text-[10px] font-medium text-white/95 leading-none whitespace-nowrap px-1.5">
+                      {seg.label}
+                    </span>
                   </div>
                 ))}
               </div>
