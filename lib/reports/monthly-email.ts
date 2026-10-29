@@ -214,9 +214,9 @@ export function buildMonthlyEmailHtml(data: MonthlyReportData): string {
           This report was automatically generated for your FCCH short-term rental portfolio.
         </p>
         <p style="margin:8px 0 0;font-size:12px;">
-          <a href="https://fcch.vercel.app/settings" style="color:#6FA1AF;text-decoration:none;">Manage report settings</a>
+          <a href="${process.env.NEXT_PUBLIC_SITE_URL ?? "https://fcch-str.vercel.app"}/settings" style="color:#6FA1AF;text-decoration:none;">Manage report settings</a>
           <span style="color:#4b5563;margin:0 8px;">·</span>
-          <a href="https://fcch.vercel.app/settings" style="color:#6FA1AF;text-decoration:none;">Unsubscribe</a>
+          <a href="${process.env.NEXT_PUBLIC_SITE_URL ?? "https://fcch-str.vercel.app"}/settings" style="color:#6FA1AF;text-decoration:none;">Unsubscribe</a>
         </p>
       </td></tr>
 

@@ -164,7 +164,7 @@ async function generateAndSendReport(): Promise<NextResponse> {
 
   const resend = new Resend(resendKey)
   const { data: emailData, error: emailError } = await resend.emails.send({
-    from   : "FCCH Reports <reports@resend.dev>",
+    from   : "FCCH Reports <reports@foxcitiescorporatehousing.com>",
     to     : [recipientEmail],
     subject: `📊 ${period.monthLabel} Portfolio Report`,
     html,

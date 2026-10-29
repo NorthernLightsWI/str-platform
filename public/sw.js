@@ -1,7 +1,7 @@
 // FCCH Manager — Service Worker
 // Caches /operations/* pages with NetworkFirst and static assets with CacheFirst.
 
-const CACHE_VERSION      = "v1"
+const CACHE_VERSION      = "v2"
 const STATIC_CACHE       = `fcch-static-${CACHE_VERSION}`
 const OPERATIONS_CACHE   = `fcch-operations-${CACHE_VERSION}`
 

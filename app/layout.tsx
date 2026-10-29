@@ -19,6 +19,7 @@ export const metadata: Metadata = {
   title: "Fox Cities Corporate Housing",
   description: "Unified short-term rental management",
   manifest: "/manifest.json",
+  themeColor: "#0A0D10",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

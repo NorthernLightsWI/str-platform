@@ -7,6 +7,7 @@ const ADMIN_HOME          = "/overview"
 const CLEANER_HOME        = "/operations/property-overview"
 const MAINTENANCE_HOME    = "/operations/property-info"
 const MAINTENANCE_ALLOWED = ["/operations/property-info", "/operations/maintenance"]
+const CLEANER_ALLOWED     = ["/operations/"]
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -69,6 +70,18 @@ export async function updateSession(request: NextRequest) {
       if (!allowed) {
         const url = request.nextUrl.clone()
         url.pathname = MAINTENANCE_HOME
+        return NextResponse.redirect(url)
+      }
+    }
+
+    // Cleaner users can only access /operations/* pages
+    if (role === "cleaner") {
+      const allowed = CLEANER_ALLOWED.some(
+        p => pathname === p || pathname.startsWith(p)
+      )
+      if (!allowed) {
+        const url = request.nextUrl.clone()
+        url.pathname = CLEANER_HOME
         return NextResponse.redirect(url)
       }
     }
