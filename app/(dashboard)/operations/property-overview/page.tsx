@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { createClient }      from "@/lib/supabase/server"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   PropertyOverviewClient,
   type CardData,
@@ -35,7 +36,7 @@ export default async function PropertyOverviewPage() {
   const today    = utcToday()
   const todayStr = toYMD(today)
 
-  const [{ data: propData }, { data: bkData }, { data: cleanData }] = await Promise.all([
+  const [{ data: propData }, { data: bkData }, { data: cleanData }, hiddenIds] = await Promise.all([
     supabase
       .from("properties")
       .select("id, external_name, internal_name, city, state")
@@ -57,9 +58,11 @@ export default async function PropertyOverviewPage() {
       .eq("status", "completed")
       .gte("scheduled_date", toYMD(addDays(today, -90)))
       .order("completed_at", { ascending: false }),
+
+    getHiddenPropertyIds(),
   ])
 
-  const properties = propData  ?? []
+  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
   const bookings   = bkData    ?? []
   const cleanings  = cleanData ?? []
 
