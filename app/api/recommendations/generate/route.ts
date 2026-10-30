@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 // ── Market constants (Appleton, WI) ────────────────────────────────────────────
 const MARKET_OCC    = 57
@@ -17,6 +18,7 @@ type Priority = "critical" | "high" | "medium" | "low"
 type Category = "pricing" | "occupancy" | "listing_quality" | "reviews" | "ranking"
 
 type GeneratedRec = {
+  rule_key         : string
   title            : string
   body             : string
   priority         : Priority
@@ -54,10 +56,10 @@ function generateRules(metrics: {
   occupancy_pct    : number
   adr              : number
   revpar           : number
-  recent_bookings  : number   // arrivals in last 30 days (past)
-  bookings_last14  : number   // arrivals in last 14 days (past)
-  upcoming_30days  : number   // arrivals in next 30 days (future)
-  review_count     : number   // lifetime total reviews in DB
+  recent_bookings  : number
+  bookings_last14  : number
+  upcoming_30days  : number
+  review_count     : number
   future_bookings  : FutureBooking[]
   today            : Date
 }): GeneratedRec[] {
@@ -67,19 +69,14 @@ function generateRules(metrics: {
   } = metrics
   const recs: GeneratedRec[] = []
 
-  // Track whether a dead-calendar rule fires so we don't double-fire the
-  // generic "No Recent Bookings" rule on the same property.
   let deadCalendarFired = false
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 1 (NEW): Listing Freshness
-  // Triggers when there are no arrivals in the last 14 days AND no upcoming
-  // arrivals in the next 30 days — a fully dead booking window.
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 1: Listing Freshness
   if (bookings_last14 === 0 && upcoming_30days === 0) {
     deadCalendarFired = true
     const estMonthlyRevAtMarket = Math.round(MARKET_ADR * (MARKET_OCC / 100) * 30)
     recs.push({
+      rule_key : "listing_freshness",
       title    : "No Recent Activity — Listing May Need Attention",
       body     : `${name} has had no new bookings in the last 14 days and no confirmed arrivals in the next 30 days. A completely empty booking window this wide almost always signals a pricing, visibility, or minimum-stay problem.`,
       priority : "high",
@@ -96,11 +93,10 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 2 (existing): Low occupancy — critical
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 2a: Low occupancy — critical
   if (occupancy_pct < 20) {
     recs.push({
+      rule_key : "low_occupancy_critical",
       title    : "Critically Low Occupancy",
       body     : `${name} has only ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days — far below the Appleton market average of ${MARKET_OCC}%. Immediate action is needed to prevent sustained revenue loss.`,
       priority : "critical",
@@ -115,7 +111,9 @@ function generateRules(metrics: {
       ],
     })
   } else if (occupancy_pct < 40) {
+    // Rule 2b: Low occupancy — high priority
     recs.push({
+      rule_key : "low_occupancy_high",
       title    : "Below-Average Occupancy",
       body     : `${name} is at ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, compared to the Appleton market average of ${MARKET_OCC}%. There is significant room to fill more nights.`,
       priority : "high",
@@ -130,12 +128,11 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 3 (existing): ADR more than 30% below market
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 3: ADR more than 30% below market
   const adrGap = MARKET_ADR - adr
   if (adr > 0 && adrGap / MARKET_ADR > 0.30) {
     recs.push({
+      rule_key : "adr_below_market",
       title    : "ADR Significantly Below Market",
       body     : `${name} has an ADR of $${adr.toFixed(0)}, which is $${adrGap.toFixed(0)} (${Math.round(adrGap / MARKET_ADR * 100)}%) below the Appleton market average of $${MARKET_ADR}. Even with high occupancy this limits total revenue.`,
       priority : "high",
@@ -151,12 +148,10 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 4 (existing): No bookings in last 30 days
-  // Suppressed when the more-specific Listing Freshness rule (Rule 1) already fired.
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 4: No bookings in last 30 days (suppressed when Rule 1 fired)
   if (recent_bookings === 0 && !deadCalendarFired) {
     recs.push({
+      rule_key : "no_recent_bookings",
       title    : "No Recent Bookings",
       body     : `${name} has received zero bookings with arrivals in the last ${RECENT_DAYS} days. This may signal a listing visibility issue, pricing problem, or calendar availability gap.`,
       priority : "high",
@@ -172,13 +167,11 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 5 (existing): High occupancy with ADR near market — consider raising
-  // Not fired when the more-specific High Performer rule (Rule 7) covers it.
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 5: High occupancy, raise rates (ADR near market)
   const adrNearMarket = adr >= MARKET_ADR * 0.80
   if (occupancy_pct > 80 && adrNearMarket) {
     recs.push({
+      rule_key : "raise_rates_high_occ",
       title    : "High Occupancy — Consider Raising Rates",
       body     : `${name} has ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, well above the Appleton market average of ${MARKET_OCC}%. When demand is this high, rates can often be raised without losing bookings.`,
       priority : "medium",
@@ -193,11 +186,10 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 6 (existing): Very low RevPAR
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 6: Very low RevPAR
   if (revpar < 50 && revpar >= 0) {
     recs.push({
+      rule_key : "very_low_revpar",
       title    : "Very Low RevPAR",
       body     : `${name} has a RevPAR of $${revpar.toFixed(0)}, far below the Appleton market benchmark of $${MARKET_REVPAR}. Low RevPAR means the property isn't generating enough revenue relative to its available nights.`,
       priority : "high",
@@ -212,15 +204,14 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 7 (NEW): High Performer — strong occupancy but ADR 20%+ below market
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 7: High performer, ADR 20%+ below market
   const adrBelowMarket20 = adr > 0 && adr < MARKET_ADR * 0.80
   if (occupancy_pct > 75 && adrBelowMarket20) {
-    const rateIncrease = Math.round((MARKET_ADR - adr) * 0.5)  // aim halfway to market
+    const rateIncrease = Math.round((MARKET_ADR - adr) * 0.5)
     const targetRate   = Math.round(adr + rateIncrease)
     const annualImpact = Math.round(rateIncrease * (occupancy_pct / 100) * 365)
     recs.push({
+      rule_key : "high_performer_underpriced",
       title    : "Raise Your Rates — You're Leaving Money on the Table",
       body     : `${name} is booking well at ${occupancy_pct.toFixed(1)}% occupancy but at only $${adr.toFixed(0)}/night — $${(MARKET_ADR - adr).toFixed(0)} below the Appleton market average of $${MARKET_ADR}/night. High demand means you can raise rates without losing meaningful occupancy.`,
       priority : "high",
@@ -236,12 +227,11 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 8 (NEW): Review Count — fewer than 5 reviews
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 8: Low review count
   if (review_count < 5) {
     const need = 5 - review_count
     recs.push({
+      rule_key : "low_review_count",
       title    : "Build Your Review Base",
       body     : `${name} has only ${review_count} review${review_count === 1 ? "" : "s"} — below the 5-review threshold that search algorithms use to boost ranking and conversion. ${need} more would clear that bar.`,
       priority : "medium",
@@ -257,10 +247,7 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 9 (NEW): Orphan Gap Filler — 1–3 night gaps between bookings in the
-  // next 60 days that are unlikely to fill at standard minimum stay settings.
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 9: Orphan gaps in next 60 days
   const orphanGaps = findOrphanGaps(future_bookings)
   if (orphanGaps.length > 0) {
     const totalGapNights   = orphanGaps.reduce((s, g) => s + g.nights, 0)
@@ -270,6 +257,7 @@ function generateRules(metrics: {
       .map(g => `${g.nights}n (${g.gapStart} → ${g.gapEnd})`)
       .join(", ")
     recs.push({
+      rule_key : "orphan_gaps",
       title    : `Fill ${orphanGaps.length} Short Gap${orphanGaps.length > 1 ? "s" : ""} in the Next 60 Days`,
       body     : `${name} has ${orphanGaps.length} gap${orphanGaps.length > 1 ? "s" : ""} of 1–3 nights between existing bookings in the next 60 days: ${preview}${orphanGaps.length > 3 ? `, plus ${orphanGaps.length - 3} more` : ""}. These dates are nearly impossible to fill with a standard 2- or 3-night minimum but highly fillable with targeted gap pricing.`,
       priority : "medium",
@@ -284,20 +272,18 @@ function generateRules(metrics: {
     })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Rule 10 (NEW): Seasonal Opportunity — peak month coming, occupancy lagging
-  // Appleton peak season: June, July, August (multiplier ~1.35×)
-  // ─────────────────────────────────────────────────────────────────────────
+  // Rule 10: Seasonal opportunity — peak month coming, low occupancy
   const nextMonth      = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1))
-  const nextMonthIndex = nextMonth.getUTCMonth()   // 0-indexed
+  const nextMonthIndex = nextMonth.getUTCMonth()
   if (PEAK_MONTHS.has(nextMonthIndex) && occupancy_pct < 70) {
     const peakMultiplier = 1.35
-    const peakTargetADR  = Math.round(MARKET_ADR * peakMultiplier)             // ~$280
-    const peakRevPAR     = Math.round(peakTargetADR * 0.75)                    // at 75% occ
+    const peakTargetADR  = Math.round(MARKET_ADR * peakMultiplier)
+    const peakRevPAR     = Math.round(peakTargetADR * 0.75)
     const currentRevPAR  = Math.round(adr * occupancy_pct / 100)
     const monthlyUpside  = Math.round((peakRevPAR - Math.max(currentRevPAR, 0)) * 30)
     const peakMonthName  = nextMonth.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })
     recs.push({
+      rule_key : "seasonal_opportunity",
       title    : `Peak Season Alert — Optimize ${name} for ${peakMonthName} Now`,
       body     : `${peakMonthName} is one of Appleton's highest-demand months and ${name} is entering the season at only ${occupancy_pct.toFixed(1)}% occupancy. Properties that raise rates and refresh listings 3–4 weeks before peak season consistently out-earn those that wait.`,
       priority : "critical",
@@ -347,19 +333,28 @@ async function generateRecommendations() {
   const admin = createAdminClient()
   const today = new Date()
 
-  const { data: properties, error: propErr } = await admin
-    .from("properties")
-    .select("id, internal_name, external_name")
-    .eq("is_active", true)
+  const [{ data: propertiesRaw, error: propErr }, hiddenIds] = await Promise.all([
+    admin
+      .from("properties")
+      .select("id, internal_name, external_name")
+      .eq("is_active", true),
+    getHiddenPropertyIds(),
+  ])
 
-  if (propErr || !properties?.length) {
+  if (propErr || !propertiesRaw?.length) {
     return NextResponse.json({ error: "No active properties" }, { status: 400 })
   }
 
+  const properties = propertiesRaw.filter(p => !hiddenIds.has(p.id))
+  if (!properties.length) {
+    return NextResponse.json({ generated: 0, resolved: 0, properties: 0 })
+  }
+
   // ── Date strings ──────────────────────────────────────────────────────────
+  const nowISO          = new Date().toISOString()
   const todayStr        = today.toISOString().slice(0, 10)
-  const cutoffStr       = new Date(today.getTime() - PERIOD_DAYS  * 86_400_000).toISOString().slice(0, 10)
-  const recentCutoffStr = new Date(today.getTime() - RECENT_DAYS  * 86_400_000).toISOString().slice(0, 10)
+  const cutoffStr       = new Date(today.getTime() - PERIOD_DAYS * 86_400_000).toISOString().slice(0, 10)
+  const recentCutoffStr = new Date(today.getTime() - RECENT_DAYS * 86_400_000).toISOString().slice(0, 10)
   const last14Str       = new Date(today.getTime() - 14           * 86_400_000).toISOString().slice(0, 10)
   const future30Str     = new Date(today.getTime() + 30           * 86_400_000).toISOString().slice(0, 10)
   const future60Str     = new Date(today.getTime() + 60           * 86_400_000).toISOString().slice(0, 10)
@@ -371,8 +366,8 @@ async function generateRecommendations() {
     { data: pastBookings },
     { data: futureBookings },
     { data: reviews },
+    { data: existingRecs },
   ] = await Promise.all([
-    // Past 90 days — occupancy, ADR, RevPAR
     admin
       .from("bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
@@ -381,7 +376,6 @@ async function generateRecommendations() {
       .gte("arrival", cutoffStr)
       .lt("arrival", todayStr),
 
-    // Next 60 days — gap detection + upcoming booking count
     admin
       .from("bookings")
       .select("property_id, arrival, departure")
@@ -391,12 +385,28 @@ async function generateRecommendations() {
       .lte("arrival", future60Str)
       .order("arrival", { ascending: true }),
 
-    // Lifetime reviews — count per property
     admin
       .from("reviews")
       .select("property_id")
       .in("property_id", propertyIds),
+
+    // Fetch existing active recs that have a rule_key (eligible for upsert / auto-resolve)
+    admin
+      .from("recommendations")
+      .select("id, property_id, rule_key")
+      .in("property_id", propertyIds)
+      .eq("is_dismissed", false)
+      .eq("is_completed" as any, false)
+      .not("rule_key" as any, "is", null),
   ])
+
+  // ── Build lookup: `{property_id}|{rule_key}` → existing rec id ────────────
+  const existingMap = new Map<string, string>()
+  for (const r of (existingRecs ?? []) as Array<{ id: string; property_id: string | null; rule_key: string | null }>) {
+    if (r.property_id && r.rule_key) {
+      existingMap.set(`${r.property_id}|${r.rule_key}`, r.id)
+    }
+  }
 
   // ── Aggregate past bookings ───────────────────────────────────────────────
   const byProperty = new Map<string, NonNullable<typeof pastBookings>>()
@@ -406,7 +416,6 @@ async function generateRecommendations() {
     byProperty.set(b.property_id, arr)
   }
 
-  // ── Aggregate future bookings ─────────────────────────────────────────────
   const futureByProperty = new Map<string, FutureBooking[]>()
   for (const b of futureBookings ?? []) {
     const arr = futureByProperty.get(b.property_id) ?? []
@@ -414,32 +423,15 @@ async function generateRecommendations() {
     futureByProperty.set(b.property_id, arr)
   }
 
-  // ── Review counts ─────────────────────────────────────────────────────────
   const reviewCountMap = new Map<string, number>()
   for (const r of reviews ?? []) {
     if (!r.property_id) continue
     reviewCountMap.set(r.property_id, (reviewCountMap.get(r.property_id) ?? 0) + 1)
   }
 
-  // ── Clear existing undismissed recs before writing fresh ones ─────────────
-  await admin
-    .from("recommendations")
-    .delete()
-    .in("property_id", propertyIds)
-    .eq("is_dismissed", false)
-    .eq("is_completed" as any, false)
-
-  const rows: {
-    property_id      : string
-    title            : string
-    body             : string
-    priority         : string
-    category         : string
-    impact_statement : string
-    action_steps     : string[]
-    is_dismissed     : boolean
-    is_completed     : boolean
-  }[] = []
+  // ── Per-property: generate rules and collect upsert rows ──────────────────
+  const toUpsert: Record<string, unknown>[] = []
+  const generatedKeysByProp = new Map<string, Set<string>>()  // prop_id → rule_keys fired
 
   for (const p of properties) {
     const pBookings    = byProperty.get(p.id) ?? []
@@ -482,8 +474,14 @@ async function generateRecommendations() {
       today,
     })
 
+    const firedKeys = new Set<string>()
+
     for (const r of recs) {
-      rows.push({
+      firedKeys.add(r.rule_key)
+      const mapKey    = `${p.id}|${r.rule_key}`
+      const existingId = existingMap.get(mapKey)
+
+      const row: Record<string, unknown> = {
         property_id      : p.id,
         title            : r.title,
         body             : r.body,
@@ -491,16 +489,57 @@ async function generateRecommendations() {
         category         : r.category,
         impact_statement : r.impact_statement,
         action_steps     : r.action_steps,
+        rule_key         : r.rule_key,
+        refreshed_at     : nowISO,
         is_dismissed     : false,
         is_completed     : false,
-      })
+      }
+
+      if (existingId) {
+        // Include id so upsert updates rather than inserts
+        row.id = existingId
+      }
+
+      toUpsert.push(row)
+    }
+
+    generatedKeysByProp.set(p.id, firedKeys)
+  }
+
+  // ── Upsert all generated rows ─────────────────────────────────────────────
+  let generated = 0
+  if (toUpsert.length) {
+    const { error: upsertErr } = await admin
+      .from("recommendations")
+      .upsert(toUpsert as any, { onConflict: "id" })
+    if (upsertErr) return NextResponse.json({ error: upsertErr.message }, { status: 500 })
+    generated = toUpsert.length
+  }
+
+  // ── Auto-resolve: active recs whose rule no longer applies ────────────────
+  // Only touches recs that have a rule_key; leaves dismissed recs untouched.
+  const toAutoResolveIds: string[] = []
+  for (const r of (existingRecs ?? []) as Array<{ id: string; property_id: string | null; rule_key: string | null }>) {
+    if (!r.property_id || !r.rule_key) continue
+    const firedKeys = generatedKeysByProp.get(r.property_id)
+    if (!firedKeys || !firedKeys.has(r.rule_key)) {
+      toAutoResolveIds.push(r.id)
     }
   }
 
-  if (rows.length) {
-    const { error: insErr } = await admin.from("recommendations").insert(rows as any)
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
+  let resolved = 0
+  if (toAutoResolveIds.length) {
+    const { error: resolveErr } = await admin
+      .from("recommendations")
+      .update({
+        is_completed : true,
+        completed_at : nowISO,
+        metadata     : { auto_resolved: true, completed_note: "Auto-resolved: condition no longer met" },
+      } as any)
+      .in("id", toAutoResolveIds)
+    if (resolveErr) return NextResponse.json({ error: resolveErr.message }, { status: 500 })
+    resolved = toAutoResolveIds.length
   }
 
-  return NextResponse.json({ generated: rows.length, properties: properties.length })
+  return NextResponse.json({ generated, resolved, properties: properties.length })
 }

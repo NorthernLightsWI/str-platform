@@ -21,6 +21,7 @@ export type RecommendationData = {
   is_dismissed     : boolean
   is_completed     : boolean
   created_at       : string
+  refreshed_at     : string | null
 }
 
 // ── Badge helpers ──────────────────────────────────────────────────────────
@@ -54,6 +55,48 @@ function categoryStyle(c: string) {
     ranking        : "bg-pink-500/15   text-pink-400",
   }
   return MAP[c] ?? "bg-muted/60 text-muted-foreground"
+}
+
+// ── Age badge ──────────────────────────────────────────────────────────────
+
+type AgeTier = "fresh" | "stale" | "old"
+
+function recAge(rec: RecommendationData): { label: string; tier: AgeTier } {
+  const iso  = rec.refreshed_at ?? rec.created_at
+  const days = (Date.now() - new Date(iso).getTime()) / 86_400_000
+  let label: string
+  if      (days < 1)   label = "Generated today"
+  else if (days < 2)   label = "1 day ago"
+  else if (days < 7)   label = `${Math.floor(days)} days ago`
+  else if (days < 14)  label = "1 week ago"
+  else if (days < 30)  label = `${Math.floor(days / 7)} weeks ago`
+  else if (days < 60)  label = "Last month"
+  else                 label = `${Math.floor(days / 30)} months ago`
+
+  const tier: AgeTier = days < 7 ? "fresh" : days <= 30 ? "stale" : "old"
+  return { label, tier }
+}
+
+function ageBadgeStyle(tier: AgeTier): string {
+  switch (tier) {
+    case "fresh": return "bg-[#6FA1AF]/15 text-[#6FA1AF]"
+    case "stale": return "bg-amber-500/15 text-amber-400"
+    case "old"  : return "bg-red-500/15   text-red-400"
+  }
+}
+
+function lastRefreshedLabel(recs: RecommendationData[]): string | null {
+  const active = recs.filter(r => !r.is_dismissed && !r.is_completed)
+  if (!active.length) return null
+  const latest = active
+    .map(r => new Date(r.refreshed_at ?? r.created_at).getTime())
+    .reduce((a, b) => Math.max(a, b), 0)
+  const days = (Date.now() - latest) / 86_400_000
+  if (days < 1)   return "Last refreshed today"
+  if (days < 2)   return "Last refreshed 1 day ago"
+  if (days < 7)   return `Last refreshed ${Math.floor(days)} days ago`
+  if (days < 14)  return "Last refreshed 1 week ago"
+  return `Last refreshed ${Math.floor(days / 7)} weeks ago`
 }
 
 // ── Recommendation card ────────────────────────────────────────────────────
@@ -99,6 +142,17 @@ function RecCard({ rec, onAction }: { rec: RecommendationData; onAction: () => v
             )}>
               {categoryLabel(rec.category)}
             </span>
+            {(() => {
+              const { label, tier } = recAge(rec)
+              return (
+                <span className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                  ageBadgeStyle(tier),
+                )}>
+                  {label}
+                </span>
+              )
+            })()}
           </div>
           <p className="font-semibold text-foreground leading-snug">{rec.title}</p>
           <p className="text-xs text-muted-foreground">{rec.property_name}</p>
@@ -207,7 +261,9 @@ export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) 
       const res  = await fetch("/api/recommendations/generate", { method: "POST" })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? "Generation failed")
-      setGenSuccess(`Generated ${json.generated} recommendation${json.generated !== 1 ? "s" : ""}`)
+      const parts = [`${json.generated} recommendation${json.generated !== 1 ? "s" : ""} refreshed`]
+      if (json.resolved > 0) parts.push(`${json.resolved} auto-resolved`)
+      setGenSuccess(parts.join(" · "))
       router.refresh()
     } catch (err) {
       setGenError(String(err instanceof Error ? err.message : err))
@@ -235,6 +291,13 @@ export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) 
           <Sparkles className={cn("size-4", generating && "animate-pulse")} />
           {generating ? "Generating…" : "Generate recommendations"}
         </button>
+
+        {(() => {
+          const label = lastRefreshedLabel(recs)
+          return label && !genSuccess && !genError ? (
+            <span className="text-xs text-muted-foreground">{label}</span>
+          ) : null
+        })()}
 
         {genSuccess && (
           <span className="text-sm text-emerald-400 flex items-center gap-1">

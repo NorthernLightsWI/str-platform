@@ -777,49 +777,67 @@ export type Database = {
       }
       recommendations: {
         Row: {
-          action_url: string | null
-          body: string | null
-          category: string
-          created_at: string
-          dismissed_at: string | null
-          expires_at: string | null
-          id: string
-          is_dismissed: boolean
-          metadata: Json | null
-          priority: string
-          property_id: string | null
-          title: string
-          updated_at: string
+          action_steps     : string[] | null
+          action_url       : string | null
+          body             : string | null
+          category         : string
+          completed_at     : string | null
+          created_at       : string
+          dismissed_at     : string | null
+          expires_at       : string | null
+          id               : string
+          impact_statement : string | null
+          is_completed     : boolean
+          is_dismissed     : boolean
+          metadata         : Json | null
+          priority         : string
+          property_id      : string | null
+          refreshed_at     : string | null
+          rule_key         : string | null
+          title            : string
+          updated_at       : string
         }
         Insert: {
-          action_url?: string | null
-          body?: string | null
-          category: string
-          created_at?: string
-          dismissed_at?: string | null
-          expires_at?: string | null
-          id?: string
-          is_dismissed?: boolean
-          metadata?: Json | null
-          priority?: string
-          property_id?: string | null
-          title: string
-          updated_at?: string
+          action_steps?    : string[] | null
+          action_url?      : string | null
+          body?            : string | null
+          category         : string
+          completed_at?    : string | null
+          created_at?      : string
+          dismissed_at?    : string | null
+          expires_at?      : string | null
+          id?              : string
+          impact_statement?: string | null
+          is_completed?    : boolean
+          is_dismissed?    : boolean
+          metadata?        : Json | null
+          priority?        : string
+          property_id?     : string | null
+          refreshed_at?    : string | null
+          rule_key?        : string | null
+          title            : string
+          updated_at?      : string
         }
         Update: {
-          action_url?: string | null
-          body?: string | null
-          category?: string
-          created_at?: string
-          dismissed_at?: string | null
-          expires_at?: string | null
-          id?: string
-          is_dismissed?: boolean
-          metadata?: Json | null
-          priority?: string
-          property_id?: string | null
-          title?: string
-          updated_at?: string
+          action_steps?    : string[] | null
+          action_url?      : string | null
+          body?            : string | null
+          category?        : string
+          completed_at?    : string | null
+          created_at?      : string
+          dismissed_at?    : string | null
+          expires_at?      : string | null
+          id?              : string
+          impact_statement?: string | null
+          is_completed?    : boolean
+          is_dismissed?    : boolean
+          metadata?        : Json | null
+          priority?        : string
+          property_id?     : string | null
+          refreshed_at?    : string | null
+          rule_key?        : string | null
+          title?           : string
+          updated_at?      : string
         }
         Relationships: [
           {

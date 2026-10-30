@@ -14,7 +14,7 @@ export default async function RecommendationsPage() {
       .select(`
         id, property_id, title, body, priority, category,
         impact_statement, action_steps,
-        is_dismissed, is_completed, created_at,
+        is_dismissed, is_completed, created_at, refreshed_at,
         properties(internal_name, external_name)
       `)
       .order("created_at", { ascending: false }),
@@ -34,6 +34,7 @@ export default async function RecommendationsPage() {
     is_dismissed     : boolean | null
     is_completed     : boolean | null
     created_at       : string
+    refreshed_at     : string | null
     properties       : { internal_name: string | null; external_name: string } | null
   }
 
@@ -54,6 +55,7 @@ export default async function RecommendationsPage() {
     is_dismissed     : r.is_dismissed     ?? false,
     is_completed     : r.is_completed     ?? false,
     created_at       : r.created_at,
+    refreshed_at     : r.refreshed_at     ?? null,
   }))
 
   const activeCount = recs.filter(r => !r.is_dismissed && !r.is_completed).length
