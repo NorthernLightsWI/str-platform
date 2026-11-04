@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { runOwnerRezSync }   from "@/lib/sync/ownerrez"
 import { runReviewsSync }    from "@/lib/sync/reviews"
 import { runAmenitiesSync }  from "@/lib/sync/amenities"
-import { getPriceLabsListings, updateListingTags, fetchNeighborhoodData } from "@/lib/pricelabs"
+import { getPriceLabsListings, fetchNeighborhoodData } from "@/lib/pricelabs"
 import {
   getMarketDefaults,
   aggregateBookings,
@@ -229,47 +229,10 @@ export async function fetchPriceLabsListings(): Promise<
 }
 
 export async function testPriceLabsTagWrite(
-  listingId: string,
-  action   : "add" | "remove",
+  _listingId: string,
+  _action   : "add" | "remove",
 ): Promise<{ ok?: boolean; error?: string; message?: string }> {
-  try {
-    await requireAdmin()
-    const admin  = createAdminClient()
-    const apiKey = await getPriceLabsApiKey(admin)
-    if (!apiKey) return { error: "PriceLabs API key not configured" }
-
-    // Fetch current tags so we don't clobber existing ones
-    const fetchResult = await getPriceLabsListings(apiKey)
-    if (!fetchResult.ok) return { error: fetchResult.error }
-
-    const listing = fetchResult.listings.find(l => l.id === listingId)
-    if (!listing) return { error: `Listing ${listingId} not found in PriceLabs account` }
-
-    const TEST_TAG    = "claude-test"
-    const currentTags = listing.tags ?? []
-    let newTags: string[]
-
-    if (action === "add") {
-      if (currentTags.includes(TEST_TAG)) return { ok: true, message: "Tag already present" }
-      if (currentTags.length >= 10) return { error: "Listing already has 10 tags (PriceLabs maximum)" }
-      newTags = [...currentTags, TEST_TAG]
-    } else {
-      newTags = currentTags.filter(t => t !== TEST_TAG)
-      if (newTags.length === currentTags.length) return { ok: true, message: "Tag was not present" }
-    }
-
-    const writeResult = await updateListingTags(apiKey, listingId, listing.pms, newTags)
-    if (!writeResult.ok) return { error: writeResult.error }
-
-    return {
-      ok     : true,
-      message: action === "add"
-        ? `Tag 'claude-test' added to "${listing.name}"`
-        : `Tag 'claude-test' removed from "${listing.name}"`,
-    }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Failed" }
-  }
+  return { error: "Tag writes disabled until tag handling is verified" }
 }
 
 export async function getPropertyPlPrice(propertyId: string): Promise<{

@@ -53,7 +53,16 @@
       "Read(//c/Users/tjhal/Desktop/custom-companycam/**)",
       "Bash(npm outdated *)",
       "Bash(dir \"C:\\\\Users\\\\tjhal\\\\Desktop\\\\str-platform\" /b)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "WebFetch(domain:developers.pricelabs.co)",
+      "WebFetch(domain:pricelabs.co)",
+      "WebFetch(domain:api.pricelabs.co)",
+      "WebSearch",
+      "WebFetch(domain:documenter.getpostman.com)",
+      "Bash(xargs grep -n \"DEFAULT_MARKET\\\\|export const.*MARKET\")",
+      "Bash(xargs grep -n \"Appleton.*207\\\\|Appleton.*57\\\\|market.*207\\\\|market.*57\")",
+      "Bash(xargs -0 grep -nH \"207\\\\|57\\\\|117\\\\.99\\\\|118\\\\|206\\\\.60\")",
+      "Bash(Get-Content \"app/\\(dashboard\\)/analytics/page.tsx\" -Raw)"
     ]
   }
 }

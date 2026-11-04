@@ -630,23 +630,7 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
           )}
         </Field>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => handleTagTest("add")}
-            disabled={tagTesting || !tagListingId}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-          >
-            {tagTesting ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            Add claude-test tag
-          </button>
-          <button
-            onClick={() => handleTagTest("remove")}
-            disabled={tagTesting || !tagListingId}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-          >
-            {tagTesting ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-            Remove claude-test tag
-          </button>
-          <ActionMsg result={tagResult} />
+          <p className="text-xs text-muted-foreground italic">Disabled until tag handling is verified</p>
         </div>
       </Card>
     </div>
