@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
+import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
 
-// ── Market constants (Appleton, WI) ────────────────────────────────────────────
-const MARKET_OCC    = 57
-const MARKET_ADR    = 207
-const MARKET_REVPAR = +(MARKET_ADR * MARKET_OCC / 100).toFixed(2)   // ~118
 const PERIOD_DAYS   = 90
 const RECENT_DAYS   = 30
 
@@ -62,10 +59,15 @@ function generateRules(metrics: {
   review_count     : number
   future_bookings  : FutureBooking[]
   today            : Date
+  benchmarkAdr     : number
+  benchmarkOcc     : number
+  benchmarkRevpar  : number
+  benchmarkLabel   : string
 }): GeneratedRec[] {
   const {
     name, occupancy_pct, adr, revpar, recent_bookings,
     bookings_last14, upcoming_30days, review_count, future_bookings, today,
+    benchmarkAdr, benchmarkOcc, benchmarkRevpar,
   } = metrics
   const recs: GeneratedRec[] = []
 
@@ -74,7 +76,7 @@ function generateRules(metrics: {
   // Rule 1: Listing Freshness
   if (bookings_last14 === 0 && upcoming_30days === 0) {
     deadCalendarFired = true
-    const estMonthlyRevAtMarket = Math.round(MARKET_ADR * (MARKET_OCC / 100) * 30)
+    const estMonthlyRevAtMarket = Math.round(benchmarkAdr * (benchmarkOcc / 100) * 30)
     recs.push({
       rule_key : "listing_freshness",
       title    : "No Recent Activity — Listing May Need Attention",
@@ -98,7 +100,7 @@ function generateRules(metrics: {
     recs.push({
       rule_key : "low_occupancy_critical",
       title    : "Critically Low Occupancy",
-      body     : `${name} has only ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days — far below the Appleton market average of ${MARKET_OCC}%. Immediate action is needed to prevent sustained revenue loss.`,
+      body     : `${name} has only ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days — far below the benchmark of ${benchmarkOcc}% (${metrics.benchmarkLabel}). Immediate action is needed to prevent sustained revenue loss.`,
       priority : "critical",
       category : "occupancy",
       impact_statement: `Raising occupancy to 40% could more than double revenue for this property.`,
@@ -115,10 +117,10 @@ function generateRules(metrics: {
     recs.push({
       rule_key : "low_occupancy_high",
       title    : "Below-Average Occupancy",
-      body     : `${name} is at ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, compared to the Appleton market average of ${MARKET_OCC}%. There is significant room to fill more nights.`,
+      body     : `${name} is at ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, compared to the benchmark of ${benchmarkOcc}% (${metrics.benchmarkLabel}). There is significant room to fill more nights.`,
       priority : "high",
       category : "occupancy",
-      impact_statement: `Closing the gap to market average (${MARKET_OCC}%) could increase revenue by ~${Math.round((MARKET_OCC - occupancy_pct) / Math.max(occupancy_pct, 1) * 100)}%.`,
+      impact_statement: `Closing the gap to benchmark (${benchmarkOcc}%) could increase revenue by ~${Math.round((benchmarkOcc - occupancy_pct) / Math.max(occupancy_pct, 1) * 100)}%.`,
       action_steps: [
         `Reduce rates 10–15% during slow periods to attract more bookings`,
         `Activate gap-fill pricing for 1–2 night gaps between reservations`,
@@ -129,15 +131,15 @@ function generateRules(metrics: {
   }
 
   // Rule 3: ADR more than 30% below market
-  const adrGap = MARKET_ADR - adr
-  if (adr > 0 && adrGap / MARKET_ADR > 0.30) {
+  const adrGap = benchmarkAdr - adr
+  if (adr > 0 && adrGap / benchmarkAdr > 0.30) {
     recs.push({
       rule_key : "adr_below_market",
       title    : "ADR Significantly Below Market",
-      body     : `${name} has an ADR of $${adr.toFixed(0)}, which is $${adrGap.toFixed(0)} (${Math.round(adrGap / MARKET_ADR * 100)}%) below the Appleton market average of $${MARKET_ADR}. Even with high occupancy this limits total revenue.`,
+      body     : `${name} has an ADR of $${adr.toFixed(0)}, which is $${adrGap.toFixed(0)} (${Math.round(adrGap / benchmarkAdr * 100)}%) below the benchmark of $${benchmarkAdr} (${metrics.benchmarkLabel}). Even with high occupancy this limits total revenue.`,
       priority : "high",
       category : "pricing",
-      impact_statement: `Raising ADR by $${Math.round(adrGap * 0.5)} (halfway to market) could add $${Math.round(adrGap * 0.5 * (occupancy_pct / 100) * PERIOD_DAYS)} in revenue over ${PERIOD_DAYS} days.`,
+      impact_statement: `Raising ADR by $${Math.round(adrGap * 0.5)} (halfway to benchmark) could add $${Math.round(adrGap * 0.5 * (occupancy_pct / 100) * PERIOD_DAYS)} in revenue over ${PERIOD_DAYS} days.`,
       action_steps: [
         `Audit competitor listings in Appleton and set rates at or above their median`,
         `Add a weekend premium (Friday–Saturday rates 20–30% higher than weekday)`,
@@ -168,12 +170,12 @@ function generateRules(metrics: {
   }
 
   // Rule 5: High occupancy, raise rates (ADR near market)
-  const adrNearMarket = adr >= MARKET_ADR * 0.80
+  const adrNearMarket = adr >= benchmarkAdr * 0.80
   if (occupancy_pct > 80 && adrNearMarket) {
     recs.push({
       rule_key : "raise_rates_high_occ",
       title    : "High Occupancy — Consider Raising Rates",
-      body     : `${name} has ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, well above the Appleton market average of ${MARKET_OCC}%. When demand is this high, rates can often be raised without losing bookings.`,
+      body     : `${name} has ${occupancy_pct.toFixed(1)}% occupancy over the last ${PERIOD_DAYS} days, well above the benchmark of ${benchmarkOcc}% (${metrics.benchmarkLabel}). When demand is this high, rates can often be raised without losing bookings.`,
       priority : "medium",
       category : "pricing",
       impact_statement: `A 10–15% rate increase at this occupancy level could improve RevPAR by a similar margin with minimal booking loss.`,
@@ -191,13 +193,13 @@ function generateRules(metrics: {
     recs.push({
       rule_key : "very_low_revpar",
       title    : "Very Low RevPAR",
-      body     : `${name} has a RevPAR of $${revpar.toFixed(0)}, far below the Appleton market benchmark of $${MARKET_REVPAR}. Low RevPAR means the property isn't generating enough revenue relative to its available nights.`,
+      body     : `${name} has a RevPAR of $${revpar.toFixed(0)}, far below the benchmark of $${benchmarkRevpar} (${metrics.benchmarkLabel}). Low RevPAR means the property isn't generating enough revenue relative to its available nights.`,
       priority : "high",
       category : "pricing",
-      impact_statement: `Reaching the market RevPAR of $${MARKET_REVPAR} would represent a ${revpar > 0 ? Math.round((MARKET_REVPAR - revpar) / revpar * 100) : "large"}% revenue increase over ${PERIOD_DAYS} days.`,
+      impact_statement: `Reaching the benchmark RevPAR of $${benchmarkRevpar} would represent a ${revpar > 0 ? Math.round((benchmarkRevpar - revpar) / revpar * 100) : "large"}% revenue increase over ${PERIOD_DAYS} days.`,
       action_steps: [
         `Address both occupancy and ADR simultaneously — low RevPAR is usually a combined problem`,
-        `Set a RevPAR floor target of $${Math.round(MARKET_REVPAR * 0.7)} and work backwards to required rate × occupancy`,
+        `Set a RevPAR floor target of $${Math.round(benchmarkRevpar * 0.7)} and work backwards to required rate × occupancy`,
         `Evaluate whether listing on additional platforms (Vrbo, direct bookings) would increase volume`,
         `Check if cleaning fees or other add-on fees are reducing booking conversion`,
       ],
@@ -205,15 +207,15 @@ function generateRules(metrics: {
   }
 
   // Rule 7: High performer, ADR 20%+ below market
-  const adrBelowMarket20 = adr > 0 && adr < MARKET_ADR * 0.80
+  const adrBelowMarket20 = adr > 0 && adr < benchmarkAdr * 0.80
   if (occupancy_pct > 75 && adrBelowMarket20) {
-    const rateIncrease = Math.round((MARKET_ADR - adr) * 0.5)
+    const rateIncrease = Math.round((benchmarkAdr - adr) * 0.5)
     const targetRate   = Math.round(adr + rateIncrease)
     const annualImpact = Math.round(rateIncrease * (occupancy_pct / 100) * 365)
     recs.push({
       rule_key : "high_performer_underpriced",
       title    : "Raise Your Rates — You're Leaving Money on the Table",
-      body     : `${name} is booking well at ${occupancy_pct.toFixed(1)}% occupancy but at only $${adr.toFixed(0)}/night — $${(MARKET_ADR - adr).toFixed(0)} below the Appleton market average of $${MARKET_ADR}/night. High demand means you can raise rates without losing meaningful occupancy.`,
+      body     : `${name} is booking well at ${occupancy_pct.toFixed(1)}% occupancy but at only $${adr.toFixed(0)}/night — $${(benchmarkAdr - adr).toFixed(0)} below the benchmark of $${benchmarkAdr}/night (${metrics.benchmarkLabel}). High demand means you can raise rates without losing meaningful occupancy.`,
       priority : "high",
       category : "pricing",
       impact_statement: `Raising your base rate to $${targetRate}/night (halfway to market) could add ~$${annualImpact.toLocaleString()} in annual revenue at your current occupancy level.`,
@@ -251,7 +253,7 @@ function generateRules(metrics: {
   const orphanGaps = findOrphanGaps(future_bookings)
   if (orphanGaps.length > 0) {
     const totalGapNights   = orphanGaps.reduce((s, g) => s + g.nights, 0)
-    const potentialRevenue = Math.round(totalGapNights * Math.max(adr, MARKET_ADR * 0.7) * 0.85)
+    const potentialRevenue = Math.round(totalGapNights * Math.max(adr, benchmarkAdr * 0.7) * 0.85)
     const preview          = orphanGaps
       .slice(0, 3)
       .map(g => `${g.nights}n (${g.gapStart} → ${g.gapEnd})`)
@@ -277,7 +279,7 @@ function generateRules(metrics: {
   const nextMonthIndex = nextMonth.getUTCMonth()
   if (PEAK_MONTHS.has(nextMonthIndex) && occupancy_pct < 70) {
     const peakMultiplier = 1.35
-    const peakTargetADR  = Math.round(MARKET_ADR * peakMultiplier)
+    const peakTargetADR  = Math.round(benchmarkAdr * peakMultiplier)
     const peakRevPAR     = Math.round(peakTargetADR * 0.75)
     const currentRevPAR  = Math.round(adr * occupancy_pct / 100)
     const monthlyUpside  = Math.round((peakRevPAR - Math.max(currentRevPAR, 0)) * 30)
@@ -333,10 +335,14 @@ async function generateRecommendations() {
   const admin = createAdminClient()
   const today = new Date()
 
-  const [{ data: propertiesRaw, error: propErr }, hiddenIds] = await Promise.all([
+  const [{ data: propertiesRaw, error: propErr }, { data: propGroupsData }, hiddenIds] = await Promise.all([
     admin
       .from("properties")
-      .select("id, internal_name, external_name")
+      .select("id, internal_name, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
+      .eq("is_active", true),
+    admin
+      .from("properties")
+      .select("id, parent_property_id")
       .eq("is_active", true),
     getHiddenPropertyIds(),
   ])
@@ -345,9 +351,26 @@ async function generateRecommendations() {
     return NextResponse.json({ error: "No active properties" }, { status: 400 })
   }
 
-  const properties = propertiesRaw.filter(p => !hiddenIds.has(p.id))
+  const properties = propertiesRaw.filter(p => !hiddenIds.has(p.id)) as PropertyMeta[]
   if (!properties.length) {
     return NextResponse.json({ generated: 0, resolved: 0, properties: 0 })
+  }
+
+  // ── Build sibling map (property_id → Set<sibling_ids>) ─────────────────────
+  const siblingMap = new Map<string, Set<string>>()
+  const groupsByParent = new Map<string, string[]>()
+  for (const p of propGroupsData ?? []) {
+    if (p.parent_property_id) {
+      const arr = groupsByParent.get(p.parent_property_id) ?? []
+      arr.push(p.id)
+      groupsByParent.set(p.parent_property_id, arr)
+    }
+  }
+  for (const [, children] of groupsByParent) {
+    for (const childId of children) {
+      const siblings = new Set(children.filter(id => id !== childId))
+      siblingMap.set(childId, siblings)
+    }
   }
 
   // ── Date strings ──────────────────────────────────────────────────────────
@@ -408,6 +431,10 @@ async function generateRecommendations() {
     }
   }
 
+  // ── Fetch market defaults and build aggregated bookings for benchmarks ─────
+  const { marketAdr, marketOcc } = await getMarketDefaults(admin)
+  const aggBookings = aggregateBookings(pastBookings ?? [])
+
   // ── Aggregate past bookings ───────────────────────────────────────────────
   const byProperty = new Map<string, NonNullable<typeof pastBookings>>()
   for (const b of pastBookings ?? []) {
@@ -456,10 +483,20 @@ async function generateRecommendations() {
     const occupancy_pct = +(((bookedNights / PERIOD_DAYS) * 100).toFixed(1))
     const adr           = bookedNights > 0 ? +(revenue / bookedNights).toFixed(2) : 0
     const revpar        = +(revenue / PERIOD_DAYS).toFixed(2)
-    const name          = p.internal_name || p.external_name
+    const name          = (p as any).internal_name || p.external_name
 
     const propFuture    = futureByProperty.get(p.id) ?? []
     const upcoming_30   = propFuture.filter(b => b.arrival <= future30Str).length
+
+    const bench = computeBenchmark({
+      property     : p,
+      allProperties: properties,
+      aggBookings,
+      hiddenIds,
+      siblingIds   : siblingMap.get(p.id) ?? new Set(),
+      marketAdr,
+      marketOcc,
+    })
 
     const recs = generateRules({
       name,
@@ -472,6 +509,10 @@ async function generateRecommendations() {
       review_count    : reviewCountMap.get(p.id) ?? 0,
       future_bookings : propFuture,
       today,
+      benchmarkAdr    : bench.adr,
+      benchmarkOcc    : bench.occupancy,
+      benchmarkRevpar : bench.revpar,
+      benchmarkLabel  : bench.sourceLabel,
     })
 
     const firedKeys = new Set<string>()

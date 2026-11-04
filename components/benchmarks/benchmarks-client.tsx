@@ -4,21 +4,19 @@ import { useState } from "react"
 import { ArrowUpRight, ArrowDownRight, Minus, ChevronUp, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-// ── Market baselines ──────────────────────────────────────────────────────────
-
-export const MARKET_OCC    = 57          // percent
-export const MARKET_ADR    = 206.60      // dollars
-export const MARKET_REVPAR = +(MARKET_ADR * MARKET_OCC / 100).toFixed(2)  // 117.76
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PropertyRow = {
-  id        : string
-  name      : string
-  occupancy : number   // 0–100
-  adr       : number   // dollars
-  revpar    : number   // dollars
-  score     : number   // 0–100
+  id             : string
+  name           : string
+  occupancy      : number   // 0–100
+  adr            : number   // dollars
+  revpar         : number   // dollars
+  score          : number   // 0–100
+  benchmarkOcc   : number
+  benchmarkAdr   : number
+  benchmarkRevpar: number
+  benchmarkSource: string
 }
 
 export type PortfolioSummary = {
@@ -48,6 +46,26 @@ function rowHighlight(score: number): string {
   if (score < 30) return "bg-red-500/5 hover:bg-red-500/10"
   if (score < 50) return "bg-amber-500/5 hover:bg-amber-500/8"
   return "hover:bg-muted/30"
+}
+
+// ── Benchmark source badge ────────────────────────────────────────────────────
+
+function SourceBadge({ source }: { source: string }) {
+  const isOverride   = source.startsWith("your target")
+  const isComparable = source.startsWith("similar")
+  const cls = isOverride
+    ? "bg-[#E88159]/15 text-[#E88159] border-[#E88159]/30"
+    : isComparable
+      ? "bg-[#6FA1AF]/15 text-[#6FA1AF] border-[#6FA1AF]/30"
+      : "bg-muted/40 text-muted-foreground border-border"
+  return (
+    <span className={cn(
+      "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium max-w-[120px] truncate",
+      cls,
+    )} title={source}>
+      {isOverride ? "override" : isComparable ? "comparable" : "market"}
+    </span>
+  )
 }
 
 // ── Diff cell ─────────────────────────────────────────────────────────────────
@@ -148,9 +166,15 @@ function MktTd({ children }: { children: React.ReactNode }) {
 export function BenchmarksClient({
   rows,
   summary,
+  marketOcc,
+  marketAdr,
+  marketRevpar,
 }: {
-  rows    : PropertyRow[]
-  summary : PortfolioSummary
+  rows        : PropertyRow[]
+  summary     : PortfolioSummary
+  marketOcc   : number
+  marketAdr   : number
+  marketRevpar: number
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "score",
@@ -180,9 +204,9 @@ export function BenchmarksClient({
       {/* Market baseline callout */}
       <div className="flex flex-wrap gap-4">
         {[
-          { label: "Market Occupancy", value: `${MARKET_OCC}%` },
-          { label: "Market ADR",       value: `$${MARKET_ADR.toFixed(2)}` },
-          { label: "Market RevPAR",    value: `$${MARKET_REVPAR.toFixed(2)}` },
+          { label: "Market Occupancy", value: `${marketOcc}%` },
+          { label: "Market ADR",       value: `$${marketAdr.toFixed(2)}` },
+          { label: "Market RevPAR",    value: `$${marketRevpar.toFixed(2)}` },
           { label: "Market",           value: "Appleton, WI" },
         ].map(item => (
           <div key={item.label} className="rounded-xl border border-border bg-card px-4 py-3">
@@ -207,9 +231,20 @@ export function BenchmarksClient({
         ))}
       </div>
 
+      {/* Benchmark source legend */}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span>Benchmark:</span>
+        <SourceBadge source="your target (override example)" />
+        <span className="text-[10px] text-muted-foreground">Override</span>
+        <SourceBadge source="similar listings (comparable)" />
+        <span className="text-[10px] text-muted-foreground">Comparable</span>
+        <SourceBadge source="market" />
+        <span className="text-[10px] text-muted-foreground">Market</span>
+      </div>
+
       {/* Table */}
       <div className="rounded-xl border border-border bg-card overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]">
+        <table className="w-full text-sm min-w-[1000px]">
           <thead>
             {/* Group headers */}
             <tr className="border-b border-border/50">
@@ -232,6 +267,9 @@ export function BenchmarksClient({
               >
                 RevPAR
               </th>
+              <th className="px-3 py-2 border-l border-border/50 text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider text-center">
+                Benchmark
+              </th>
               <th className="px-3 py-2 border-l border-border/50" />
             </tr>
             {/* Column headers */}
@@ -250,6 +288,8 @@ export function BenchmarksClient({
               <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Avg</th>
               <th className="px-3 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">±</th>
 
+              <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
+
               <SortTh label="Score" col="score"     sort={sort} onSort={handleSort} />
             </tr>
           </thead>
@@ -266,22 +306,27 @@ export function BenchmarksClient({
                 <td className="px-3 py-3 text-right tabular-nums text-foreground font-medium">
                   {fmtPct(row.occupancy)}
                 </td>
-                <MktTd>{fmtPct(MARKET_OCC)}</MktTd>
-                <DiffCell value={row.occupancy - MARKET_OCC}     unit="pp"  />
+                <MktTd>{fmtPct(row.benchmarkOcc)}</MktTd>
+                <DiffCell value={row.occupancy - row.benchmarkOcc}     unit="pp"  />
 
                 {/* ADR */}
                 <td className="px-3 py-3 text-right tabular-nums text-foreground font-medium">
                   {fmtUSD(row.adr)}
                 </td>
-                <MktTd>{fmtUSD(MARKET_ADR)}</MktTd>
-                <DiffCell value={row.adr - MARKET_ADR}           unit="usd" />
+                <MktTd>{fmtUSD(row.benchmarkAdr)}</MktTd>
+                <DiffCell value={row.adr - row.benchmarkAdr}           unit="usd" />
 
                 {/* RevPAR */}
                 <td className="px-3 py-3 text-right tabular-nums text-foreground font-medium">
                   {fmtUSD(row.revpar)}
                 </td>
-                <MktTd>{fmtUSD(MARKET_REVPAR)}</MktTd>
-                <DiffCell value={row.revpar - MARKET_REVPAR}     unit="usd" />
+                <MktTd>{fmtUSD(row.benchmarkRevpar)}</MktTd>
+                <DiffCell value={row.revpar - row.benchmarkRevpar}     unit="usd" />
+
+                {/* Benchmark source */}
+                <td className="px-3 py-3 text-center">
+                  <SourceBadge source={row.benchmarkSource} />
+                </td>
 
                 {/* Score */}
                 <td className="px-3 py-3 text-right">
@@ -302,22 +347,25 @@ export function BenchmarksClient({
               <td className="px-3 py-3 text-right tabular-nums font-semibold text-foreground">
                 {fmtPct(summary.occupancy)}
               </td>
-              <MktTd>{fmtPct(MARKET_OCC)}</MktTd>
-              <DiffCell value={summary.occupancy - MARKET_OCC}   unit="pp"  />
+              <MktTd>{fmtPct(marketOcc)}</MktTd>
+              <DiffCell value={summary.occupancy - marketOcc}   unit="pp"  />
 
               {/* ADR */}
               <td className="px-3 py-3 text-right tabular-nums font-semibold text-foreground">
                 {fmtUSD(summary.adr)}
               </td>
-              <MktTd>{fmtUSD(MARKET_ADR)}</MktTd>
-              <DiffCell value={summary.adr - MARKET_ADR}         unit="usd" />
+              <MktTd>{fmtUSD(marketAdr)}</MktTd>
+              <DiffCell value={summary.adr - marketAdr}         unit="usd" />
 
               {/* RevPAR */}
               <td className="px-3 py-3 text-right tabular-nums font-semibold text-foreground">
                 {fmtUSD(summary.revpar)}
               </td>
-              <MktTd>{fmtUSD(MARKET_REVPAR)}</MktTd>
-              <DiffCell value={summary.revpar - MARKET_REVPAR}   unit="usd" />
+              <MktTd>{fmtUSD(marketRevpar)}</MktTd>
+              <DiffCell value={summary.revpar - marketRevpar}   unit="usd" />
+
+              {/* Benchmark source (portfolio row — blank) */}
+              <td className="px-3 py-3" />
 
               {/* Score */}
               <td className="px-3 py-3 text-right">

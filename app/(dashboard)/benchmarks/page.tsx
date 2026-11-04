@@ -5,14 +5,12 @@ import {
   type PortfolioSummary,
 } from "@/components/benchmarks/benchmarks-client"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
-
-// ── Market baselines — Appleton, WI ──────────────────────────────────────────
-// Defined here (server-side) to avoid importing runtime values from a
-// "use client" file, which resolves to undefined in the server context.
-
-const MARKET_OCC    = 57           // percent
-const MARKET_ADR    = 206.60       // dollars
-const MARKET_REVPAR = Math.round(MARKET_ADR * MARKET_OCC) / 100  // 117.76
+import {
+  getMarketDefaults,
+  aggregateBookings,
+  computeBenchmark,
+  type PropertyMeta,
+} from "@/lib/benchmarks"
 
 // ── Score formula ─────────────────────────────────────────────────────────────
 // 50 = at market, 100 = 2× market, 0 = no activity. Capped 0–100.
@@ -22,11 +20,18 @@ function scoreComponent(value: number, market: number): number {
   return Math.min(100, Math.max(0, (value / market / 2) * 100))
 }
 
-function computeScore(occ: number, adr: number, revpar: number): number {
+function computeScore(
+  occ: number,
+  adr: number,
+  revpar: number,
+  benchOcc: number,
+  benchAdr: number,
+  benchRevpar: number,
+): number {
   const s =
-    (scoreComponent(occ,    MARKET_OCC)    +
-     scoreComponent(adr,    MARKET_ADR)    +
-     scoreComponent(revpar, MARKET_REVPAR)) / 3
+    (scoreComponent(occ,    benchOcc)    +
+     scoreComponent(adr,    benchAdr)    +
+     scoreComponent(revpar, benchRevpar)) / 3
   return isFinite(s) ? Math.round(s) : 0
 }
 
@@ -36,15 +41,23 @@ export default async function BenchmarksPage() {
   const admin = createAdminClient()
 
   const PERIOD_DAYS    = 365
+  const COMP_DAYS      = 90
   const periodStart    = new Date()
   periodStart.setFullYear(periodStart.getFullYear() - 1)
   const periodStartStr = periodStart.toISOString().slice(0, 10)
   const todayStr       = new Date().toISOString().slice(0, 10)
+  const comp90Start    = new Date(Date.now() - COMP_DAYS * 86_400_000).toISOString().slice(0, 10)
 
-  const [{ data: propData }, { data: bookingData }, hiddenIds] = await Promise.all([
+  const [
+    { data: propData },
+    { data: bookingData },
+    { data: comp90Data },
+    { data: propGroupsData },
+    hiddenIds,
+  ] = await Promise.all([
     admin
       .from("properties")
-      .select("id, internal_name, external_name")
+      .select("id, internal_name, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("is_active", true)
       .order("external_name"),
 
@@ -56,12 +69,48 @@ export default async function BenchmarksPage() {
       .gte("arrival", periodStartStr)
       .lt("arrival", todayStr),
 
+    admin
+      .from("bookings")
+      .select("property_id, arrival, departure, net_revenue, total_amount")
+      .neq("status", "cancelled")
+      .eq("is_block", false)
+      .gte("arrival", comp90Start)
+      .lt("arrival", todayStr),
+
+    admin
+      .from("properties")
+      .select("id, parent_property_id")
+      .eq("is_active", true),
+
     getHiddenPropertyIds(),
   ])
 
-  const visibleProps = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const { marketAdr, marketOcc } = await getMarketDefaults(admin)
+  const marketRevpar = Math.round(marketAdr * marketOcc) / 100
 
-  // Group bookings by property_id
+  const allProps = (propData ?? []) as PropertyMeta[]
+  const visibleProps = allProps.filter(p => !hiddenIds.has(p.id))
+
+  // Build sibling map
+  const siblingMap = new Map<string, Set<string>>()
+  const groupsByParent = new Map<string, string[]>()
+  for (const p of propGroupsData ?? []) {
+    if (p.parent_property_id) {
+      const arr = groupsByParent.get(p.parent_property_id) ?? []
+      arr.push(p.id)
+      groupsByParent.set(p.parent_property_id, arr)
+    }
+  }
+  for (const [, children] of groupsByParent) {
+    for (const childId of children) {
+      siblingMap.set(childId, new Set(children.filter(id => id !== childId)))
+    }
+  }
+
+  // Build 90-day aggregated bookings for comparable benchmark
+  const aggBookings90 = aggregateBookings(comp90Data ?? [])
+
+  // Group 365-day bookings by property_id
   const byProperty = new Map<string, NonNullable<typeof bookingData>>()
   for (const b of bookingData ?? []) {
     const arr = byProperty.get(b.property_id) ?? []
@@ -75,16 +124,11 @@ export default async function BenchmarksPage() {
     let   revenue      = 0
 
     for (const b of bookings) {
-      // Supabase returns DATE columns as "YYYY-MM-DD" strings.
-      // Appending T00:00:00 keeps both dates in the same timezone
-      // so the difference is always a whole number of days.
       const arrMs  = new Date(b.arrival   + "T00:00:00").getTime()
       const depMs  = new Date(b.departure + "T00:00:00").getTime()
       const nights = Math.max(0, (depMs - arrMs) / 86_400_000)
       bookedNights += nights
 
-      // Supabase serialises NUMERIC as a string in the JSON payload.
-      // Always coerce explicitly to avoid string-concatenation bugs.
       const rev = Number(b.net_revenue ?? b.total_amount ?? 0)
       revenue  += isFinite(rev) ? rev : 0
     }
@@ -93,13 +137,27 @@ export default async function BenchmarksPage() {
     const adr       = bookedNights > 0 ? revenue / bookedNights : 0
     const revpar    = PERIOD_DAYS  > 0 ? revenue / PERIOD_DAYS  : 0
 
+    const bench = computeBenchmark({
+      property     : p,
+      allProperties: allProps,
+      aggBookings  : aggBookings90,
+      hiddenIds,
+      siblingIds   : siblingMap.get(p.id) ?? new Set(),
+      marketAdr,
+      marketOcc,
+    })
+
     return {
-      id       : p.id,
-      name     : p.internal_name || p.external_name,
-      occupancy: +occupancy.toFixed(2),
-      adr      : +adr.toFixed(2),
-      revpar   : +revpar.toFixed(2),
-      score    : computeScore(occupancy, adr, revpar),
+      id             : p.id,
+      name           : (p as any).internal_name || p.external_name,
+      occupancy      : +occupancy.toFixed(2),
+      adr            : +adr.toFixed(2),
+      revpar         : +revpar.toFixed(2),
+      score          : computeScore(occupancy, adr, revpar, bench.occupancy, bench.adr, bench.revpar),
+      benchmarkOcc   : bench.occupancy,
+      benchmarkAdr   : bench.adr,
+      benchmarkRevpar: bench.revpar,
+      benchmarkSource: bench.sourceLabel,
     }
   })
 
@@ -137,7 +195,13 @@ export default async function BenchmarksPage() {
         </p>
       </div>
 
-      <BenchmarksClient rows={rows} summary={summary} />
+      <BenchmarksClient
+        rows={rows}
+        summary={summary}
+        marketOcc={marketOcc}
+        marketAdr={marketAdr}
+        marketRevpar={marketRevpar}
+      />
     </div>
   )
 }

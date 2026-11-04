@@ -434,6 +434,33 @@ export async function setPropertyParent(
   }
 }
 
+// ── Benchmark per-property settings ──────────────────────────────────────────
+
+export async function saveBenchmarkPropertySettings(
+  rows: { id: string; benchmark_adr_override: number | null; benchmark_occupancy_override: number | null; listing_type: string | null }[],
+): Promise<{ ok?: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+    for (const row of rows) {
+      const { error } = await (admin as any)
+        .from("properties")
+        .update({
+          benchmark_adr_override      : row.benchmark_adr_override ?? null,
+          benchmark_occupancy_override: row.benchmark_occupancy_override ?? null,
+          listing_type                : row.listing_type || null,
+        })
+        .eq("id", row.id)
+      if (error) return { error: error.message }
+    }
+    revalidatePath("/settings")
+    revalidatePath("/benchmarks")
+    return { ok: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Unknown error" }
+  }
+}
+
 // ── Property visibility ───────────────────────────────────────────────────────
 
 export async function setHiddenProperties(

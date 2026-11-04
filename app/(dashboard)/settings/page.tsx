@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { resolveListingType } from "@/lib/benchmarks"
 import {
   SettingsClient,
   type SettingsData,
@@ -9,6 +10,7 @@ import {
   type PropertyVisibilityRow,
   type PropertyGroupRow,
   type PriceLabsPropertyRow,
+  type BenchmarkPropertyRow,
 } from "@/components/settings/settings-client"
 
 function parseSettingValue(raw: unknown): string {
@@ -27,12 +29,13 @@ export default async function SettingsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }] = await Promise.all([
+  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }, { data: benchPropData }] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
     admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
+    admin.from("properties").select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override").eq("is_active", true).order("external_name"),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -47,6 +50,8 @@ export default async function SettingsPage() {
     pricelabs_writes_enabled: rawSettings.pricelabs_writes_enabled ?? "false",
     pricelabs_max_change_pct: rawSettings.pricelabs_max_change_pct ?? "10",
     report_email            : rawSettings.report_email             ?? "",
+    market_adr              : rawSettings.market_adr               ?? "207",
+    market_occupancy        : rawSettings.market_occupancy         ?? "57",
   }
 
   const users: UserRow[] = (usersData ?? []).map(u => ({
@@ -103,6 +108,38 @@ export default async function SettingsPage() {
     if (raw) hiddenIds = JSON.parse(raw)
   } catch { /* malformed JSON — treat as empty */ }
 
+  type RawBenchProp = {
+    id                           : string
+    external_name                : string
+    internal_name                : string | null
+    bedrooms                     : number | null
+    listing_type                 : string | null
+    benchmark_adr_override       : number | null
+    benchmark_occupancy_override : number | null
+  }
+
+  const marketAdrNum = parseFloat(rawSettings.market_adr ?? "207") || 207
+  const marketOccNum = parseFloat(rawSettings.market_occupancy ?? "57") || 57
+
+  const benchmarkProperties: BenchmarkPropertyRow[] = ((benchPropData ?? []) as RawBenchProp[]).map(p => {
+    const oAdr = p.benchmark_adr_override != null ? Number(p.benchmark_adr_override) : null
+    const oOcc = p.benchmark_occupancy_override != null ? Number(p.benchmark_occupancy_override) : null
+    const hasOverride = oAdr != null && oOcc != null && oAdr > 0 && oOcc > 0
+    const lt = resolveListingType(p.listing_type, p.external_name)
+    const benchmarkLabel = hasOverride
+      ? `your target ($${Math.round(oAdr!)} ADR, ${oOcc!}% occ)`
+      : `Appleton market ($${Math.round(marketAdrNum)} ADR, ${marketOccNum}% occ)`
+    return {
+      id                          : p.id,
+      name                        : p.internal_name || p.external_name,
+      bedrooms                    : p.bedrooms ?? null,
+      listing_type                : p.listing_type ?? null,
+      benchmark_adr_override      : oAdr,
+      benchmark_occupancy_override: oOcc,
+      benchmarkLabel,
+    }
+  })
+
   return (
     <div className="p-6 space-y-5 max-w-[900px]">
       <div>
@@ -120,6 +157,7 @@ export default async function SettingsPage() {
         hiddenIds={hiddenIds}
         groupProperties={groupProperties}
         plProperties={plProperties}
+        benchmarkProperties={benchmarkProperties}
       />
     </div>
   )

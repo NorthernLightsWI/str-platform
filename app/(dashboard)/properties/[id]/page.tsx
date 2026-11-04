@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { computeHealthScore, MARKET_OCC, MARKET_ADR, MARKET_REVPAR, type HealthInput } from "@/lib/health-score"
+import { computeHealthScore, type HealthInput } from "@/lib/health-score"
+import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
 import {
   PropertyDetailClient,
   type PropertyDetail,
@@ -32,6 +33,8 @@ export default async function PropertyDetailPage({
   const year1Start = addDays(today, -365)
   const day60Start = addDays(today, -60)
 
+  const comp90Start = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
+
   const [
     { data: property },
     { data: bkData },
@@ -42,10 +45,13 @@ export default async function PropertyDetailPage({
     { data: recentBkData },
     { data: taskData },
     { data: changeData },
+    { data: allPropsData },
+    { data: comp90Data },
+    { data: propGroupsData },
   ] = await Promise.all([
     admin
       .from("properties")
-      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address, parent_property_id")
+      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address, parent_property_id, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("id", id)
       .single(),
 
@@ -106,6 +112,24 @@ export default async function PropertyDetailPage({
       .eq("property_id", id)
       .order("applied_at", { ascending: false })
       .limit(10),
+
+    admin
+      .from("properties")
+      .select("id, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
+      .eq("is_active", true),
+
+    admin
+      .from("bookings")
+      .select("property_id, arrival, departure, net_revenue, total_amount")
+      .neq("status", "cancelled")
+      .eq("is_block", false)
+      .gte("arrival", comp90Start)
+      .lt("arrival", toYMD(today)),
+
+    admin
+      .from("properties")
+      .select("id, parent_property_id")
+      .eq("is_active", true),
   ])
 
   if (!property) notFound()
@@ -126,6 +150,61 @@ export default async function PropertyDetailPage({
       .filter(r => r.id !== id)
       .map(r => ({ id: r.id, name: r.internal_name || r.external_name }))
   }
+
+  // ── Benchmark computation ─────────────────────────────────────────────────
+
+  const { marketAdr, marketOcc } = await getMarketDefaults(admin)
+
+  const propertyMeta: PropertyMeta = {
+    id                           : property.id,
+    external_name                : property.external_name,
+    bedrooms                     : property.bedrooms,
+    listing_type                 : (property as any).listing_type ?? null,
+    benchmark_adr_override       : (property as any).benchmark_adr_override ?? null,
+    benchmark_occupancy_override : (property as any).benchmark_occupancy_override ?? null,
+  }
+
+  const allPropsMeta = (allPropsData ?? []) as PropertyMeta[]
+  const aggBookings90 = aggregateBookings(comp90Data ?? [])
+
+  // Build hiddenIds from prop groups fetch (we re-use the sibling exclusion approach)
+  const propGroupsSiblings = new Set<string>()
+  const groupsByParent90 = new Map<string, string[]>()
+  for (const p of propGroupsData ?? []) {
+    if (p.parent_property_id) {
+      const arr = groupsByParent90.get(p.parent_property_id) ?? []
+      arr.push(p.id)
+      groupsByParent90.set(p.parent_property_id, arr)
+    }
+  }
+  for (const [, children] of groupsByParent90) {
+    if (children.includes(id)) {
+      children.filter(c => c !== id).forEach(c => propGroupsSiblings.add(c))
+    }
+  }
+
+  const { data: hiddenSettingData } = await admin
+    .from("app_settings")
+    .select("value")
+    .eq("key", "hidden_properties")
+    .maybeSingle()
+
+  let hiddenIdSet = new Set<string>()
+  try {
+    const raw = (hiddenSettingData as any)?.value
+    if (Array.isArray(raw)) hiddenIdSet = new Set(raw.filter((v: unknown): v is string => typeof v === "string"))
+    else if (typeof raw === "string") { const p = JSON.parse(raw); if (Array.isArray(p)) hiddenIdSet = new Set(p) }
+  } catch { /* ignore */ }
+
+  const bench = computeBenchmark({
+    property     : propertyMeta,
+    allProperties: allPropsMeta,
+    aggBookings  : aggBookings90,
+    hiddenIds    : hiddenIdSet,
+    siblingIds   : propGroupsSiblings,
+    marketAdr,
+    marketOcc,
+  })
 
   // ── Health score ──────────────────────────────────────────────────────────
 
@@ -153,12 +232,14 @@ export default async function PropertyDetailPage({
     avgRating,
     hasRecentCleaning     : (cleaningData ?? []).length > 0,
     openHighPriorityIssues: (maintData ?? []).length,
+    marketOcc             : bench.occupancy,
+    marketAdr             : bench.adr,
   }
   const hs = computeHealthScore(input)
 
   // ── Revenue opportunity ───────────────────────────────────────────────────
 
-  const potentialRevPAR    = (MARKET_OCC / 100) * MARKET_ADR   // ~$118/night
+  const potentialRevPAR    = (bench.occupancy / 100) * bench.adr
   const potentialAnnual    = potentialRevPAR * 365
   const currentAnnual      = rev12m
   const annualOpportunity  = Math.max(0, potentialAnnual - currentAnnual)
@@ -171,6 +252,7 @@ export default async function PropertyDetailPage({
     potentialRevPAR   : +potentialRevPAR.toFixed(2),
     potentialAnnual   : Math.round(potentialAnnual),
     annualOpportunity : Math.round(annualOpportunity),
+    benchmarkLabel    : bench.sourceLabel,
   }
 
   // ── Shape data for client ─────────────────────────────────────────────────

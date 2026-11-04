@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
+import { getMarketDefaults } from "@/lib/benchmarks"
 import {
   MarketIntelClient,
   type PortfolioSummary,
@@ -15,7 +16,7 @@ export default async function MarketIntelPage() {
   const periodStartStr = periodStart.toISOString().slice(0, 10)
   const todayStr       = new Date().toISOString().slice(0, 10)
 
-  const [{ data: propData }, { data: bookingData }, hiddenIds] = await Promise.all([
+  const [{ data: propData }, { data: bookingData }, hiddenIds, { marketAdr, marketOcc }] = await Promise.all([
     admin
       .from("properties")
       .select("id")
@@ -30,6 +31,7 @@ export default async function MarketIntelPage() {
       .lt("arrival", todayStr),
 
     getHiddenPropertyIds(),
+    getMarketDefaults(createAdminClient()),
   ])
 
   const propCount  = (propData ?? []).filter(p => !hiddenIds.has(p.id)).length
@@ -67,7 +69,7 @@ export default async function MarketIntelPage() {
         </p>
       </div>
 
-      <MarketIntelClient summary={summary} />
+      <MarketIntelClient summary={summary} marketAdr={marketAdr} marketOcc={marketOcc} />
     </div>
   )
 }

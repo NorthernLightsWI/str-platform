@@ -6,41 +6,6 @@ import {
 import { TrendingUp, Percent, DollarSign, Award, Sun, Users, Building2, Calendar, ArrowUpRight, ArrowDownRight, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-// ── Market constants ──────────────────────────────────────────────────────────
-
-const MARKET_OCC    = 57
-const MARKET_ADR    = 206.60
-const MARKET_REVPAR = +(MARKET_ADR * MARKET_OCC / 100).toFixed(2)  // 117.76
-const MARKET_SCORE  = 72
-
-// ── Seasonal index data ───────────────────────────────────────────────────────
-// Index values relative to annual average (100 = avg). Jul = peak.
-
-const SEASONAL = [
-  { month: "Jan", index: 65 },
-  { month: "Feb", index: 70 },
-  { month: "Mar", index: 80 },
-  { month: "Apr", index: 85 },
-  { month: "May", index: 90 },
-  { month: "Jun", index: 110 },
-  { month: "Jul", index: 120 },
-  { month: "Aug", index: 115 },
-  { month: "Sep", index: 95 },
-  { month: "Oct", index: 90 },
-  { month: "Nov", index: 75 },
-  { month: "Dec", index: 85 },
-].map(s => ({
-  ...s,
-  occ: +(MARKET_OCC * s.index / 100).toFixed(1),
-}))
-
-// Bar color based on index vs average
-function barColor(index: number): string {
-  if (index >= 100) return "#f59e0b"   // amber — peak
-  if (index >= 85)  return "#6366f1"   // indigo — shoulder
-  return "#3f3f46"                      // zinc — off-peak
-}
-
 // ── Market insights ───────────────────────────────────────────────────────────
 
 const INSIGHTS = [
@@ -90,12 +55,39 @@ const INSIGHTS = [
   },
 ]
 
+// ── Seasonal index data ───────────────────────────────────────────────────────
+// Index values relative to annual average (100 = avg). Jul = peak.
+
+const SEASONAL_INDEX = [
+  { month: "Jan", index: 65 },
+  { month: "Feb", index: 70 },
+  { month: "Mar", index: 80 },
+  { month: "Apr", index: 85 },
+  { month: "May", index: 90 },
+  { month: "Jun", index: 110 },
+  { month: "Jul", index: 120 },
+  { month: "Aug", index: 115 },
+  { month: "Sep", index: 95 },
+  { month: "Oct", index: 90 },
+  { month: "Nov", index: 75 },
+  { month: "Dec", index: 85 },
+]
+
+// Bar color based on index vs average
+function barColor(index: number): string {
+  if (index >= 100) return "#f59e0b"   // amber — peak
+  if (index >= 85)  return "#6366f1"   // indigo — shoulder
+  return "#3f3f46"                      // zinc — off-peak
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PortfolioSummary = {
   occupancy : number
   adr       : number
   revpar    : number
+  marketAdr?: number
+  marketOcc?: number
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -189,7 +181,24 @@ function SeasonalTooltip({ active, payload, label }: {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function MarketIntelClient({ summary }: { summary: PortfolioSummary }) {
+const MARKET_SCORE = 72  // Not benchmark-driven — fixed health vs national STR benchmarks
+
+export function MarketIntelClient({
+  summary,
+  marketAdr,
+  marketOcc,
+}: {
+  summary  : PortfolioSummary
+  marketAdr: number
+  marketOcc: number
+}) {
+  const MARKET_REVPAR = Math.round(marketAdr * marketOcc) / 100
+
+  const SEASONAL = SEASONAL_INDEX.map(s => ({
+    ...s,
+    occ: +(marketOcc * s.index / 100).toFixed(1),
+  }))
+
   return (
     <div className="space-y-6">
 
@@ -197,14 +206,14 @@ export function MarketIntelClient({ summary }: { summary: PortfolioSummary }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard
           label="Market Occupancy"
-          value={`${MARKET_OCC}%`}
+          value={`${marketOcc}%`}
           subtitle="Annual avg · Appleton, WI"
           icon={Percent}
           accentClass="bg-blue-500/15 text-blue-400"
         />
         <KPICard
           label="Market ADR"
-          value={`$${MARKET_ADR.toFixed(2)}`}
+          value={`$${marketAdr.toFixed(2)}`}
           subtitle="Average daily rate · all listings"
           icon={DollarSign}
           accentClass="bg-violet-500/15 text-violet-400"
@@ -259,11 +268,11 @@ export function MarketIntelClient({ summary }: { summary: PortfolioSummary }) {
                   {summary.occupancy > 0 ? `${summary.occupancy.toFixed(1)}%` : "—"}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-muted-foreground">
-                  {MARKET_OCC}%
+                  {marketOcc}%
                 </td>
                 <td className="px-5 py-4 text-right">
                   {summary.occupancy > 0
-                    ? <DiffBadge diff={summary.occupancy - MARKET_OCC} unit="pp" />
+                    ? <DiffBadge diff={summary.occupancy - marketOcc} unit="pp" />
                     : <span className="text-xs text-muted-foreground">—</span>}
                 </td>
               </tr>
@@ -273,11 +282,11 @@ export function MarketIntelClient({ summary }: { summary: PortfolioSummary }) {
                   {summary.adr > 0 ? `$${summary.adr.toFixed(2)}` : "—"}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-muted-foreground">
-                  ${MARKET_ADR.toFixed(2)}
+                  ${marketAdr.toFixed(2)}
                 </td>
                 <td className="px-5 py-4 text-right">
                   {summary.adr > 0
-                    ? <DiffBadge diff={summary.adr - MARKET_ADR} unit="usd" />
+                    ? <DiffBadge diff={summary.adr - marketAdr} unit="usd" />
                     : <span className="text-xs text-muted-foreground">—</span>}
                 </td>
               </tr>

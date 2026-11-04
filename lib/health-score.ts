@@ -1,6 +1,6 @@
-// Market baselines — Appleton, WI
-export const MARKET_OCC = 57    // percent
-export const MARKET_ADR = 207   // dollars
+// Market baselines — Appleton, WI (used as defaults when no per-property benchmark is available)
+export const MARKET_OCC    = 57    // percent
+export const MARKET_ADR    = 207   // dollars
 export const MARKET_REVPAR = Math.round(MARKET_ADR * MARKET_OCC) / 100  // ~118
 
 export type HealthInput = {
@@ -10,6 +10,8 @@ export type HealthInput = {
   avgRating             : number   // 0–5
   hasRecentCleaning     : boolean
   openHighPriorityIssues: number
+  marketOcc            ?: number   // defaults to MARKET_OCC
+  marketAdr            ?: number   // defaults to MARKET_ADR
 }
 
 export type HealthScore = {
@@ -28,8 +30,10 @@ export type HealthScore = {
 
 export function computeHealthScore(input: HealthInput): HealthScore {
   // Revenue (35 pts)
-  const occupancyScore = Math.min(input.occupancy12m / MARKET_OCC, 1.0) * 17.5
-  const adrScore       = Math.min(input.adr12m       / MARKET_ADR, 1.0) * 17.5
+  const benchOcc = input.marketOcc ?? MARKET_OCC
+  const benchAdr = input.marketAdr ?? MARKET_ADR
+  const occupancyScore = Math.min(input.occupancy12m / benchOcc, 1.0) * 17.5
+  const adrScore       = Math.min(input.adr12m       / benchAdr, 1.0) * 17.5
   const revenueScore   = occupancyScore + adrScore
 
   // Listing quality (35 pts) — 0 reviews = 0 listing score

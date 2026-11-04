@@ -37,6 +37,7 @@ export type RevenueData = {
   potentialRevPAR   : number
   potentialAnnual   : number
   annualOpportunity : number
+  benchmarkLabel    : string
 }
 
 export type RecItem = {
@@ -219,7 +220,7 @@ function RevenueSection({ rev }: { rev: RevenueData }) {
                 {fmt$(rev.annualOpportunity)}/year in potential upside
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Based on Appleton market benchmarks (57% occ · {fmt$(207)} ADR).
+                Based on {rev.benchmarkLabel}.
                 Potential annual revenue: {fmt$(rev.potentialAnnual)}.
               </p>
             </div>

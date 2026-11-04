@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import {
   Eye, EyeOff, Check, X, Loader2, RefreshCw, Plus, Trash2,
-  Plug, Users, Database, Building2, Mail, Send, Wand2,
+  Plug, Users, Database, Building2, Mail, Send, Wand2, BarChart2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -19,6 +19,7 @@ import {
   setHiddenProperties,
   setPropertyParent,
   savePriceLabsPropertySettings,
+  saveBenchmarkPropertySettings,
   fetchPriceLabsListings,
   testPriceLabsTagWrite,
 } from "@/app/actions/settings"
@@ -32,6 +33,18 @@ export type SettingsData = {
   pricelabs_writes_enabled: string
   pricelabs_max_change_pct: string
   report_email            : string
+  market_adr              : string
+  market_occupancy        : string
+}
+
+export type BenchmarkPropertyRow = {
+  id                          : string
+  name                        : string
+  bedrooms                    : number | null
+  listing_type                : string | null
+  benchmark_adr_override      : number | null
+  benchmark_occupancy_override: number | null
+  benchmarkLabel              : string
 }
 
 export type PriceLabsPropertyRow = {
@@ -74,7 +87,7 @@ export type PropertyGroupRow = {
   parent_property_id : string | null
 }
 
-type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs"
+type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs" | "benchmarks"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1281,6 +1294,169 @@ function ReportsTab({ initialEmail }: { initialEmail: string }) {
   )
 }
 
+// ── Benchmarks tab ────────────────────────────────────────────────────────────
+
+function BenchmarksTab({
+  initial,
+  benchmarkProperties,
+}: {
+  initial             : SettingsData
+  benchmarkProperties : BenchmarkPropertyRow[]
+}) {
+  const [marketAdr,  setMarketAdr]  = useState(initial.market_adr || "207")
+  const [marketOcc,  setMarketOcc]  = useState(initial.market_occupancy || "57")
+  const [mktSaving,  startMktSave]  = useTransition()
+  const [mktResult,  setMktResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  const [rows, setRows] = useState(benchmarkProperties.map(p => ({
+    id                          : p.id,
+    name                        : p.name,
+    bedrooms                    : p.bedrooms,
+    listing_type                : p.listing_type,
+    benchmark_adr_override      : p.benchmark_adr_override,
+    benchmark_occupancy_override: p.benchmark_occupancy_override,
+    benchmarkLabel              : p.benchmarkLabel,
+  })))
+
+  const [propSaving, startPropSave] = useTransition()
+  const [propResult, setPropResult] = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  function setRow(id: string, field: "listing_type" | "benchmark_adr_override" | "benchmark_occupancy_override", value: string) {
+    setRows(prev => prev.map(r =>
+      r.id !== id ? r : {
+        ...r,
+        [field]: field === "listing_type"
+          ? (value || null)
+          : (value === "" ? null : Number(value)),
+      },
+    ))
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card title="Market Defaults">
+        <p className="text-xs text-muted-foreground">
+          These values are the market-level fallback when a property has no comparable listings or
+          per-property override set. They are stored in app_settings and loaded at runtime.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Market ADR ($)">
+            <input
+              type="number"
+              min={0}
+              value={marketAdr}
+              onChange={e => setMarketAdr(e.target.value)}
+              placeholder="207"
+              className="w-full rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+            />
+          </Field>
+          <Field label="Market Occupancy (%)">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={marketOcc}
+              onChange={e => setMarketOcc(e.target.value)}
+              placeholder="57"
+              className="w-full rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+            />
+          </Field>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => startMktSave(async () => {
+              setMktResult(null)
+              const r = await saveSettings({ market_adr: marketAdr, market_occupancy: marketOcc })
+              setMktResult(r.error ? r : { ok: true, message: "Saved" })
+            })}
+            disabled={mktSaving}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50"
+          >
+            {mktSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Save
+          </button>
+          <ActionMsg result={mktResult} />
+        </div>
+      </Card>
+
+      <Card title="Per-Property Benchmarks">
+        <p className="text-xs text-muted-foreground">
+          Set a listing type and optional override targets for each property. If both ADR and
+          occupancy overrides are set, they take priority over comparable listings and the market
+          fallback. Leave blank to use automatic benchmark resolution.
+        </p>
+
+        <div className="space-y-2">
+          <div className="grid grid-cols-[1fr_60px_120px_110px_110px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <span>Property</span>
+            <span>Beds</span>
+            <span>Listing Type</span>
+            <span>Target ADR ($)</span>
+            <span>Target Occ (%)</span>
+          </div>
+          {rows.map(r => (
+            <div key={r.id} className="grid grid-cols-[1fr_60px_120px_110px_110px] gap-3 items-center">
+              <div className="min-w-0">
+                <span className="text-sm text-foreground truncate block">{r.name}</span>
+                <span className="text-[10px] text-muted-foreground/60">{r.benchmarkLabel}</span>
+              </div>
+              <span className="text-sm text-muted-foreground tabular-nums">{r.bedrooms ?? "—"}</span>
+              <select
+                value={r.listing_type ?? ""}
+                onChange={e => setRow(r.id, "listing_type", e.target.value)}
+                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 outline-none focus-visible:border-ring"
+              >
+                <option value="">Auto-detect</option>
+                <option value="nightly">Nightly</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <input
+                type="number"
+                min={0}
+                value={r.benchmark_adr_override ?? ""}
+                onChange={e => setRow(r.id, "benchmark_adr_override", e.target.value)}
+                placeholder="None"
+                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+              />
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={r.benchmark_occupancy_override ?? ""}
+                onChange={e => setRow(r.id, "benchmark_occupancy_override", e.target.value)}
+                placeholder="None"
+                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3 pt-1 border-t border-border">
+          <button
+            onClick={() => startPropSave(async () => {
+              setPropResult(null)
+              const r = await saveBenchmarkPropertySettings(rows.map(row => ({
+                id                          : row.id,
+                benchmark_adr_override      : row.benchmark_adr_override,
+                benchmark_occupancy_override: row.benchmark_occupancy_override,
+                listing_type                : row.listing_type,
+              })))
+              setPropResult(r.error ? r : { ok: true, message: "Saved" })
+            })}
+            disabled={propSaving}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50"
+          >
+            {propSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Save all
+          </button>
+          <ActionMsg result={propResult} />
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function SettingsClient({
@@ -1291,20 +1467,23 @@ export function SettingsClient({
   hiddenIds,
   groupProperties,
   plProperties = [],
+  benchmarkProperties = [],
 }: {
-  settings        : SettingsData
-  users           : UserRow[]
-  syncLog         : SyncLogRow[]
-  properties      : PropertyVisibilityRow[]
-  hiddenIds       : string[]
-  groupProperties : PropertyGroupRow[]
-  plProperties   ?: PriceLabsPropertyRow[]
+  settings             : SettingsData
+  users                : UserRow[]
+  syncLog              : SyncLogRow[]
+  properties           : PropertyVisibilityRow[]
+  hiddenIds            : string[]
+  groupProperties      : PropertyGroupRow[]
+  plProperties        ?: PriceLabsPropertyRow[]
+  benchmarkProperties ?: BenchmarkPropertyRow[]
 }) {
   const [tab, setTab] = useState<Tab>("integrations")
 
   const TABS: { value: Tab; label: string; icon: React.ElementType }[] = [
     { value: "integrations", label: "Integrations", icon: Plug      },
     { value: "pricelabs",    label: "PriceLabs",     icon: Database  },
+    { value: "benchmarks",   label: "Benchmarks",    icon: BarChart2 },
     { value: "users",        label: "Users",         icon: Users     },
     { value: "sync",         label: "Data Sync",     icon: Database  },
     { value: "visibility",   label: "Visibility",    icon: Building2 },
@@ -1339,6 +1518,7 @@ export function SettingsClient({
       {/* Tab content */}
       {tab === "integrations" && <IntegrationsTab initial={settings} />}
       {tab === "pricelabs"    && <PriceLabsMappingTab initialProperties={plProperties} />}
+      {tab === "benchmarks"   && <BenchmarksTab initial={settings} benchmarkProperties={benchmarkProperties} />}
       {tab === "users"        && <UsersTab initialUsers={users} />}
       {tab === "sync"         && <SyncTab initialLog={syncLog} />}
       {tab === "visibility"   && (

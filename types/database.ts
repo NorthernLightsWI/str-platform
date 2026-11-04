@@ -770,6 +770,8 @@ export type Database = {
           address: string | null
           bathrooms: number | null
           bedrooms: number | null
+          benchmark_adr_override: number | null
+          benchmark_occupancy_override: number | null
           city: string | null
           country: string
           created_at: string
@@ -778,6 +780,7 @@ export type Database = {
           id: string
           internal_name: string | null
           is_active: boolean
+          listing_type: string | null
           max_guests: number | null
           owner_id: string
           ownerrez_id: string | null
@@ -795,6 +798,8 @@ export type Database = {
           address?: string | null
           bathrooms?: number | null
           bedrooms?: number | null
+          benchmark_adr_override?: number | null
+          benchmark_occupancy_override?: number | null
           city?: string | null
           country?: string
           created_at?: string
@@ -803,6 +808,7 @@ export type Database = {
           id?: string
           internal_name?: string | null
           is_active?: boolean
+          listing_type?: string | null
           max_guests?: number | null
           owner_id: string
           ownerrez_id?: string | null
@@ -820,6 +826,8 @@ export type Database = {
           address?: string | null
           bathrooms?: number | null
           bedrooms?: number | null
+          benchmark_adr_override?: number | null
+          benchmark_occupancy_override?: number | null
           city?: string | null
           country?: string
           created_at?: string
@@ -828,6 +836,7 @@ export type Database = {
           id?: string
           internal_name?: string | null
           is_active?: boolean
+          listing_type?: string | null
           max_guests?: number | null
           owner_id?: string
           ownerrez_id?: string | null
