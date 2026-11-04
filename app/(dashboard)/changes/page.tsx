@@ -39,7 +39,6 @@ export default async function ChangesPage() {
     admin
       .from("properties")
       .select("id, external_name, internal_name")
-      .eq("is_active", true)
       .order("external_name"),
   ])
 

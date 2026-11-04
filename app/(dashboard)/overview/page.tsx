@@ -258,13 +258,13 @@ export default async function OverviewPage() {
   const properties : PropertyRow[] = (propData ?? []) as PropertyRow[]
   const rawBookings: BookingRow[]  = (bkData   ?? []) as BookingRow[]
 
-  const allActive = properties.filter(p => p.is_active && !hiddenIds.has(p.id))
-  const groups    = buildPropertyGroups(allActive as (PropertyRow & { parent_property_id?: string | null })[])
-  const cids      = childIdSet(groups)
-  const bookings  = mergeChildBookings(rawBookings, groups)
+  const allVisible = properties.filter(p => !hiddenIds.has(p.id))
+  const groups     = buildPropertyGroups(allVisible as (PropertyRow & { parent_property_id?: string | null })[])
+  const cids       = childIdSet(groups)
+  const bookings   = mergeChildBookings(rawBookings, groups)
 
   // Active properties for KPI counts use root-level (non-child) properties only
-  const activeProps  = allActive.filter(p => !cids.has(p.id))
+  const activeProps  = allVisible.filter(p => p.is_active && !cids.has(p.id))
   const activeCount  = activeProps.length
 
   // ── Health score inputs ───────────────────────────────────────────────────

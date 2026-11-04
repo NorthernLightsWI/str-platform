@@ -13,6 +13,7 @@ export interface PropertyReportRow {
   amenityScore: number // 0–100 or -1 if no data
   topRec      : string | null
   avgRating   : number | null
+  isActive?   : boolean
 }
 
 export interface AmenityGap {
@@ -94,7 +95,7 @@ export function buildMonthlyEmailHtml(data: MonthlyReportData): string {
 
       return `
       <tr style="border-bottom:1px solid #f3f4f6;">
-        <td style="padding:10px 8px;font-size:13px;color:#111827;font-weight:500;min-width:130px;">${p.name}</td>
+        <td style="padding:10px 8px;font-size:13px;color:#111827;font-weight:500;min-width:130px;">${p.name}${p.isActive === false ? ' <span style="display:inline-block;background:#e5e7eb;color:#6b7280;border-radius:3px;padding:0 5px;font-size:10px;font-weight:600;margin-left:5px;vertical-align:middle;line-height:18px;">inactive</span>' : ''}</td>
         <td style="padding:10px 8px;font-size:13px;color:#111827;text-align:right;">${fmt$(p.revenue)}</td>
         <td style="padding:10px 8px;font-size:12px;color:${changeColor};text-align:right;font-weight:600;">${changeStr}</td>
         <td style="padding:10px 8px;font-size:13px;color:#374151;text-align:right;">${fmtPct(p.occupancy)}</td>

@@ -72,9 +72,9 @@ function normalizeChannel(site: string | null): string {
   return "Other"
 }
 
-function computeData(bookings: BookingRaw[], properties: PropertyRaw[], monthCount: number) {
+function computeData(bookings: BookingRaw[], properties: PropertyRaw[], monthCount: number, activePropertyCount?: number) {
   const monthStarts  = generateMonthStarts(monthCount)
-  const propCount    = Math.max(properties.length, 1)
+  const propCount    = Math.max(activePropertyCount ?? properties.length, 1)
   const nameMap      = new Map(properties.map(p => [p.id, p.name]))
   const today        = new Date()
   const periodStart  = monthStarts[0]
@@ -241,16 +241,18 @@ function EmptyChart() {
 export function AnalyticsClient({
   bookings,
   properties,
+  activePropertyCount,
 }: {
-  bookings   : BookingRaw[]
-  properties : PropertyRaw[]
+  bookings             : BookingRaw[]
+  properties           : PropertyRaw[]
+  activePropertyCount? : number
 }) {
   const [tab, setTab] = useState<Tab>("12m")
   const months = TABS.find(t => t.value === tab)!.months
 
   const { monthly, channels, propRevenue } = useMemo(
-    () => computeData(bookings, properties, months),
-    [bookings, properties, months],
+    () => computeData(bookings, properties, months, activePropertyCount),
+    [bookings, properties, months, activePropertyCount],
   )
 
   const barHeight = Math.max(220, propRevenue.length * 40 + 20)

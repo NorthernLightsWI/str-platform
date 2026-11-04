@@ -47,7 +47,6 @@ export default async function CalendarPage({
     admin
       .from("properties")
       .select("id, internal_name, external_name")
-      .eq("is_active", true)
       .order("external_name"),
 
     getHiddenPropertyIds(),
@@ -76,7 +75,7 @@ export default async function CalendarPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Calendar</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Monthly booking calendar across all active properties.
+          Monthly booking calendar across all properties.
         </p>
       </div>
 

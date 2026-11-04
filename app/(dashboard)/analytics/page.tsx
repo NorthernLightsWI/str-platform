@@ -28,15 +28,24 @@ export default async function AnalyticsPage() {
 
     admin
       .from("properties")
-      .select("id, internal_name, external_name, parent_property_id")
-      .eq("is_active", true),
+      .select("id, internal_name, external_name, parent_property_id, is_active"),
 
     getHiddenPropertyIds(),
   ])
 
-  const allProps = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const bookedPropIds = new Set((bookingData ?? []).map((b: { property_id: string }) => b.property_id))
+
+  // Include active props + inactive props that had at least one booking in the period
+  const allProps = (propData ?? []).filter(
+    (p: { id: string; is_active: boolean }) => !hiddenIds.has(p.id) && (p.is_active || bookedPropIds.has(p.id))
+  )
   const groups   = buildPropertyGroups(allProps)
   const cids     = childIdSet(groups)
+
+  // Active non-child count drives the occupancy denominator
+  const activeCount = allProps.filter(
+    (p: { id: string; is_active: boolean }) => p.is_active && !cids.has(p.id)
+  ).length
 
   const rawBookings: BookingRaw[] = (bookingData ?? [])
     .filter(b => !hiddenIds.has(b.property_id))
@@ -69,7 +78,7 @@ export default async function AnalyticsPage() {
         </p>
       </div>
 
-      <AnalyticsClient bookings={bookings} properties={properties} />
+      <AnalyticsClient bookings={bookings} properties={properties} activePropertyCount={activeCount} />
     </div>
   )
 }

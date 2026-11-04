@@ -56,7 +56,7 @@ async function generateAndSendReport(): Promise<NextResponse> {
     { data: amenityRows },
   ] = await Promise.all([
     supabase.from("app_settings").select("key, value"),
-    (supabase as any).from("properties").select("id, internal_name, external_name, parent_property_id").eq("is_active", true),
+    (supabase as any).from("properties").select("id, internal_name, external_name, parent_property_id, is_active"),
     (supabase as any).from("bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.start)
@@ -100,15 +100,22 @@ async function generateAndSendReport(): Promise<NextResponse> {
   }
 
   // ── Build per-property stats ──────────────────────────────────────────────
-  const allProps    = ((properties ?? []) as Array<{ id: string; internal_name: string; external_name: string; parent_property_id: string | null }>)
-    .filter(p => !hiddenIds.has(p.id))
+  type RawProp = { id: string; internal_name: string | null; external_name: string; parent_property_id: string | null; is_active: boolean }
+
+  const currBookPropIds = new Set((currBookings ?? []).map((b: { property_id: string }) => b.property_id))
+
+  // Include active properties + inactive properties with bookings in the current period
+  const allProps    = ((properties ?? []) as RawProp[])
+    .filter(p => !hiddenIds.has(p.id) && (p.is_active || currBookPropIds.has(p.id)))
   const groups      = buildPropertyGroups(allProps)
   const cids        = childIdSet(groups)
   // Build map: child ID → [all sibling IDs including self and parent]
   const groupAllIds = new Map<string, string[]>(groups.flatMap(g => g.allIds.map(id => [id, g.allIds])))
 
   // Report shows only root-level properties (children are absorbed)
-  const props = allProps.filter(p => !cids.has(p.id))
+  const props       = allProps.filter(p => !cids.has(p.id))
+  // Amenity gap analysis is forward-looking — active properties only
+  const activeProps = props.filter(p => p.is_active)
 
   const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; total_amount: number | null }>
   const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; total_amount: number | null }>
@@ -164,10 +171,11 @@ async function generateAndSendReport(): Promise<NextResponse> {
       amenityScore,
       topRec,
       avgRating,
+      isActive    : p.is_active,
     }
   })
 
-  const topGaps = computeAmenityGaps(props, amenities)
+  const topGaps = computeAmenityGaps(activeProps, amenities)
 
   // ── Build and send email ──────────────────────────────────────────────────
   const html   = buildMonthlyEmailHtml({
