@@ -431,6 +431,81 @@ export type Database = {
           },
         ]
       }
+      proposed_changes: {
+        Row: {
+          id               : string
+          property_id      : string
+          change_type      : string
+          label            : string
+          current_value    : string | null
+          proposed_value   : string | null
+          reason           : string | null
+          recommendation_id: string | null
+          risk_note        : string | null
+          status           : string
+          payload          : Json | null
+          result           : Json | null
+          created_by       : string | null
+          decided_by       : string | null
+          decided_at       : string | null
+          applied_at       : string | null
+          created_at       : string
+        }
+        Insert: {
+          id               ?: string
+          property_id       : string
+          change_type       : string
+          label             : string
+          current_value    ?: string | null
+          proposed_value   ?: string | null
+          reason           ?: string | null
+          recommendation_id?: string | null
+          risk_note        ?: string | null
+          status           ?: string
+          payload          ?: Json | null
+          result           ?: Json | null
+          created_by       ?: string | null
+          decided_by       ?: string | null
+          decided_at       ?: string | null
+          applied_at       ?: string | null
+          created_at       ?: string
+        }
+        Update: {
+          id               ?: string
+          property_id      ?: string
+          change_type      ?: string
+          label            ?: string
+          current_value    ?: string | null
+          proposed_value   ?: string | null
+          reason           ?: string | null
+          recommendation_id?: string | null
+          risk_note        ?: string | null
+          status           ?: string
+          payload          ?: Json | null
+          result           ?: Json | null
+          created_by       ?: string | null
+          decided_by       ?: string | null
+          decided_at       ?: string | null
+          applied_at       ?: string | null
+          created_at       ?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposed_changes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposed_changes_recommendation_id_fkey"
+            columns: ["recommendation_id"]
+            isOneToOne: false
+            referencedRelation: "recommendations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maintenance_issues: {
         Row: {
           actual_cost: number | null
@@ -707,6 +782,8 @@ export type Database = {
           owner_id: string
           ownerrez_id: string | null
           parent_property_id: string | null
+          pricelabs_listing_id: string | null
+          pricelabs_price_floor: number | null
           public_url: string | null
           square_feet: number | null
           state: string | null
@@ -730,6 +807,8 @@ export type Database = {
           owner_id: string
           ownerrez_id?: string | null
           parent_property_id?: string | null
+          pricelabs_listing_id?: string | null
+          pricelabs_price_floor?: number | null
           public_url?: string | null
           square_feet?: number | null
           state?: string | null
@@ -753,6 +832,8 @@ export type Database = {
           owner_id?: string
           ownerrez_id?: string | null
           parent_property_id?: string | null
+          pricelabs_listing_id?: string | null
+          pricelabs_price_floor?: number | null
           public_url?: string | null
           square_feet?: number | null
           state?: string | null

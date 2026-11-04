@@ -2,11 +2,12 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { Sparkles, ChevronRight, CheckCircle, XCircle, Zap } from "lucide-react"
+import { Sparkles, ChevronRight, CheckCircle, XCircle, Zap, GitPullRequest } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { dismissRecommendation, completeRecommendation } from "@/app/actions/recommendations"
 import { guessChangeTypeFromCategory } from "@/lib/change-impact"
 import { LogChangeModal } from "@/components/changes/log-change-modal"
+import { ProposeChangeModal } from "@/components/proposals/propose-change-modal"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -104,11 +105,12 @@ function lastRefreshedLabel(recs: RecommendationData[]): string | null {
 // ── Recommendation card ────────────────────────────────────────────────────
 
 function RecCard({
-  rec, onAction, onApply,
+  rec, onAction, onApply, onPropose,
 }: {
   rec: RecommendationData
   onAction: () => void
   onApply: (rec: RecommendationData) => void
+  onPropose: (rec: RecommendationData) => void
 }) {
   const [pending, startTransition] = useTransition()
 
@@ -213,6 +215,16 @@ function RecCard({
                 <Zap className="size-3.5" />
                 I applied this
               </button>
+              {rec.category === "pricing" && rec.property_id && (
+                <button
+                  onClick={() => onPropose(rec)}
+                  disabled={pending}
+                  className="flex items-center gap-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-1.5 text-xs font-medium text-violet-400 hover:bg-violet-500/20 transition-colors"
+                >
+                  <GitPullRequest className="size-3.5" />
+                  Propose change
+                </button>
+              )}
               <button
                 onClick={complete}
                 disabled={pending}
@@ -259,7 +271,8 @@ export function RecommendationsClient({
   const [generating, setGenerating]   = useState(false)
   const [genError, setGenError]       = useState<string | null>(null)
   const [genSuccess, setGenSuccess]   = useState<string | null>(null)
-  const [applyRec,  setApplyRec]      = useState<RecommendationData | null>(null)
+  const [applyRec,   setApplyRec]     = useState<RecommendationData | null>(null)
+  const [proposeRec, setProposeRec]   = useState<RecommendationData | null>(null)
 
   const propertyNames = useMemo(() => {
     return [...new Set(recs.map(r => r.property_name))].sort()
@@ -429,9 +442,27 @@ export function RecommendationsClient({
               rec={r}
               onAction={() => router.refresh()}
               onApply={setApplyRec}
+              onPropose={setProposeRec}
             />
           ))}
         </div>
+      )}
+
+      {proposeRec && (
+        <ProposeChangeModal
+          properties={
+            properties.length > 0
+              ? properties
+              : [{ id: proposeRec.property_id ?? "", name: proposeRec.property_name }]
+          }
+          prefillPropertyId={proposeRec.property_id ?? undefined}
+          prefillType="price_base"
+          prefillLabel={proposeRec.title}
+          prefillReason={proposeRec.body ?? undefined}
+          prefillRecId={proposeRec.id}
+          onClose={() => setProposeRec(null)}
+          onCreated={() => { setProposeRec(null); router.refresh() }}
+        />
       )}
 
       {applyRec && (

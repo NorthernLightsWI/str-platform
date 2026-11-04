@@ -18,15 +18,25 @@ import {
   deleteUser,
   setHiddenProperties,
   setPropertyParent,
+  savePriceLabsPropertySettings,
 } from "@/app/actions/settings"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SettingsData = {
-  ownerrez_email     : string
-  ownerrez_api_token : string
-  pricelabs_api_key  : string
-  report_email       : string
+  ownerrez_email          : string
+  ownerrez_api_token      : string
+  pricelabs_api_key       : string
+  pricelabs_writes_enabled: string
+  pricelabs_max_change_pct: string
+  report_email            : string
+}
+
+export type PriceLabsPropertyRow = {
+  id                   : string
+  name                 : string
+  pricelabs_listing_id : string | null
+  pricelabs_price_floor: number | null
 }
 
 export type UserRow = {
@@ -62,7 +72,7 @@ export type PropertyGroupRow = {
   parent_property_id : string | null
 }
 
-type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports"
+type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -298,6 +308,152 @@ function IntegrationsTab({ initial }: { initial: SettingsData }) {
             Save
           </button>
           <ActionMsg result={plResult} />
+        </div>
+      </Card>
+
+      {/* PriceLabs Automation */}
+      <PriceLabsAutomationCard initial={initial} />
+    </div>
+  )
+}
+
+// ── PriceLabs automation card ─────────────────────────────────────────────────
+
+function PriceLabsAutomationCard({ initial }: { initial: SettingsData }) {
+  const [writesEnabled, setWritesEnabled] = useState(initial.pricelabs_writes_enabled === "true")
+  const [maxPct,        setMaxPct]        = useState(initial.pricelabs_max_change_pct || "10")
+  const [saving,        startSave]        = useTransition()
+  const [result,        setResult]        = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  return (
+    <Card title="PriceLabs Automation">
+      <Field label="Enable live API writes">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setWritesEnabled(v => !v)}
+            className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+              writesEnabled ? "bg-[#E88159]" : "bg-muted",
+            )}
+          >
+            <span className={cn(
+              "pointer-events-none inline-block size-4 rounded-full bg-white shadow-sm transform transition-transform",
+              writesEnabled ? "translate-x-4" : "translate-x-0",
+            )} />
+          </button>
+          <span className="text-sm text-muted-foreground">
+            {writesEnabled
+              ? "On — proposals will send live requests to PriceLabs"
+              : "Off — proposals apply in dry-run mode (no API call)"}
+          </span>
+        </div>
+      </Field>
+      <Field label="Max price change %">
+        <input
+          type="number"
+          min={1}
+          max={100}
+          value={maxPct}
+          onChange={e => setMaxPct(e.target.value)}
+          className="w-32 rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 outline-none focus-visible:border-ring"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Proposals with a larger price change are blocked when applying.
+        </p>
+      </Field>
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <button
+          onClick={() => startSave(async () => {
+            setResult(null)
+            const r = await saveSettings({
+              pricelabs_writes_enabled: String(writesEnabled),
+              pricelabs_max_change_pct: maxPct,
+            })
+            setResult(r.error ? r : { ok: true, message: "Saved" })
+          })}
+          disabled={saving}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+          Save
+        </button>
+        <ActionMsg result={result} />
+      </div>
+    </Card>
+  )
+}
+
+// ── PriceLabs mapping tab ─────────────────────────────────────────────────────
+
+function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLabsPropertyRow[] }) {
+  const [rows,    setRows]    = useState(initialProperties)
+  const [saving,  startSave]  = useTransition()
+  const [result,  setResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  function setRow(id: string, field: "pricelabs_listing_id" | "pricelabs_price_floor", value: string) {
+    setRows(prev => prev.map(r =>
+      r.id !== id ? r : {
+        ...r,
+        [field]: field === "pricelabs_price_floor"
+          ? (value === "" ? null : Number(value))
+          : (value || null),
+      },
+    ))
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card title="PriceLabs Listing Mapping">
+        <p className="text-xs text-muted-foreground">
+          Map each property to its PriceLabs listing ID. Set an optional price floor to block
+          proposals that would go below that value.
+        </p>
+        <div className="space-y-2">
+          <div className="grid grid-cols-[1fr_1fr_120px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <span>Property</span>
+            <span>PriceLabs Listing ID</span>
+            <span>Price Floor ($)</span>
+          </div>
+          {rows.map(r => (
+            <div key={r.id} className="grid grid-cols-[1fr_1fr_120px] gap-3 items-center">
+              <span className="text-sm text-foreground truncate">{r.name}</span>
+              <input
+                type="text"
+                value={r.pricelabs_listing_id ?? ""}
+                onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
+                placeholder="e.g. 12345"
+                className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+              />
+              <input
+                type="number"
+                min={0}
+                value={r.pricelabs_price_floor ?? ""}
+                onChange={e => setRow(r.id, "pricelabs_price_floor", e.target.value)}
+                placeholder="None"
+                className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 pt-1 border-t border-border">
+          <button
+            onClick={() => startSave(async () => {
+              setResult(null)
+              const r = await savePriceLabsPropertySettings(rows.map(row => ({
+                id                  : row.id,
+                pricelabs_listing_id: row.pricelabs_listing_id,
+                pricelabs_price_floor: row.pricelabs_price_floor,
+              })))
+              setResult(r.error ? r : { ok: true, message: "Saved" })
+            })}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Save all
+          </button>
+          <ActionMsg result={result} />
         </div>
       </Card>
     </div>
@@ -958,6 +1114,7 @@ export function SettingsClient({
   properties,
   hiddenIds,
   groupProperties,
+  plProperties = [],
 }: {
   settings        : SettingsData
   users           : UserRow[]
@@ -965,11 +1122,13 @@ export function SettingsClient({
   properties      : PropertyVisibilityRow[]
   hiddenIds       : string[]
   groupProperties : PropertyGroupRow[]
+  plProperties   ?: PriceLabsPropertyRow[]
 }) {
   const [tab, setTab] = useState<Tab>("integrations")
 
   const TABS: { value: Tab; label: string; icon: React.ElementType }[] = [
     { value: "integrations", label: "Integrations", icon: Plug      },
+    { value: "pricelabs",    label: "PriceLabs",     icon: Database  },
     { value: "users",        label: "Users",         icon: Users     },
     { value: "sync",         label: "Data Sync",     icon: Database  },
     { value: "visibility",   label: "Visibility",    icon: Building2 },
@@ -1003,6 +1162,7 @@ export function SettingsClient({
 
       {/* Tab content */}
       {tab === "integrations" && <IntegrationsTab initial={settings} />}
+      {tab === "pricelabs"    && <PriceLabsMappingTab initialProperties={plProperties} />}
       {tab === "users"        && <UsersTab initialUsers={users} />}
       {tab === "sync"         && <SyncTab initialLog={syncLog} />}
       {tab === "visibility"   && (

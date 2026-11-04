@@ -8,6 +8,7 @@ import {
   type SyncLogRow,
   type PropertyVisibilityRow,
   type PropertyGroupRow,
+  type PriceLabsPropertyRow,
 } from "@/components/settings/settings-client"
 
 function parseSettingValue(raw: unknown): string {
@@ -26,11 +27,12 @@ export default async function SettingsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }] = await Promise.all([
+  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
     admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
+    (admin as any).from("properties").select("id, external_name, internal_name, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -39,10 +41,12 @@ export default async function SettingsPage() {
   }
 
   const settings: SettingsData = {
-    ownerrez_email     : rawSettings.ownerrez_email     ?? "",
-    ownerrez_api_token : rawSettings.ownerrez_api_token ?? "",
-    pricelabs_api_key  : rawSettings.pricelabs_api_key  ?? "",
-    report_email       : rawSettings.report_email       ?? "",
+    ownerrez_email          : rawSettings.ownerrez_email           ?? "",
+    ownerrez_api_token      : rawSettings.ownerrez_api_token       ?? "",
+    pricelabs_api_key       : rawSettings.pricelabs_api_key        ?? "",
+    pricelabs_writes_enabled: rawSettings.pricelabs_writes_enabled ?? "false",
+    pricelabs_max_change_pct: rawSettings.pricelabs_max_change_pct ?? "10",
+    report_email            : rawSettings.report_email             ?? "",
   }
 
   const users: UserRow[] = (usersData ?? []).map(u => ({
@@ -78,6 +82,21 @@ export default async function SettingsPage() {
     parent_property_id : p.parent_property_id ?? null,
   }))
 
+  type RawPlProp = {
+    id                   : string
+    external_name        : string
+    internal_name        : string | null
+    pricelabs_listing_id : string | null
+    pricelabs_price_floor: number | null
+  }
+
+  const plProperties: PriceLabsPropertyRow[] = ((plPropData ?? []) as RawPlProp[]).map(p => ({
+    id                   : p.id,
+    name                 : p.internal_name || p.external_name,
+    pricelabs_listing_id : p.pricelabs_listing_id ?? null,
+    pricelabs_price_floor: p.pricelabs_price_floor != null ? Number(p.pricelabs_price_floor) : null,
+  }))
+
   let hiddenIds: string[] = []
   try {
     const raw = rawSettings.hidden_properties
@@ -100,6 +119,7 @@ export default async function SettingsPage() {
         properties={properties}
         hiddenIds={hiddenIds}
         groupProperties={groupProperties}
+        plProperties={plProperties}
       />
     </div>
   )

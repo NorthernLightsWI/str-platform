@@ -50,6 +50,32 @@ export async function saveSettings(entries: Record<string, string>) {
   }
 }
 
+// ── PriceLabs per-property settings ──────────────────────────────────────────
+
+export async function savePriceLabsPropertySettings(
+  rows: { id: string; pricelabs_listing_id: string | null; pricelabs_price_floor: number | null }[],
+): Promise<{ ok?: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+    for (const row of rows) {
+      const { error } = await (admin as any)
+        .from("properties")
+        .update({
+          pricelabs_listing_id : row.pricelabs_listing_id  || null,
+          pricelabs_price_floor: row.pricelabs_price_floor ?? null,
+        })
+        .eq("id", row.id)
+      if (error) return { error: error.message }
+    }
+    revalidatePath("/settings")
+    revalidatePath("/proposals")
+    return { ok: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Unknown error" }
+  }
+}
+
 // ── OwnerRez sync ─────────────────────────────────────────────────────────────
 
 export async function syncOwnerRez(): Promise<
