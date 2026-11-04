@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useTransition } from "react"
-import { X, Send } from "lucide-react"
+import { useState, useEffect, useTransition } from "react"
+import { X, Send, Loader2 } from "lucide-react"
 import { createProposal } from "@/app/actions/proposed-changes"
+import { getPropertyPlPrice } from "@/app/actions/settings"
 import type { ChangeTypeValue } from "@/lib/change-impact"
 import { CHANGE_TYPE_LABELS } from "@/lib/change-impact"
 
@@ -38,6 +39,23 @@ export function ProposeChangeModal({
   const [riskNote,      setRiskNote]      = useState("")
   const [error,         setError]         = useState<string | null>(null)
   const [pending,       startTransition]  = useTransition()
+  const [plHint,        setPlHint]        = useState<{
+    base: number | null; min: number | null; push_enabled: boolean
+    listing_name: string; listing_id: string
+  } | null>(null)
+  const [hintLoading,   setHintLoading]   = useState(false)
+
+  const showHint = changeType === "price_base" || changeType === "price_min"
+
+  useEffect(() => {
+    if (!showHint || !propertyId) { setPlHint(null); return }
+    let cancelled = false
+    setHintLoading(true)
+    getPropertyPlPrice(propertyId).then(h => {
+      if (!cancelled) { setPlHint(h); setHintLoading(false) }
+    })
+    return () => { cancelled = true }
+  }, [propertyId, changeType, showHint])
 
   const lockProperty = !!prefillPropertyId && properties.length === 1
 
@@ -157,6 +175,27 @@ export function ProposeChangeModal({
               />
             </div>
           </div>
+
+          {/* PriceLabs price hint */}
+          {showHint && (
+            hintLoading ? (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                Loading PriceLabs price…
+              </p>
+            ) : plHint ? (
+              <div className="rounded-lg bg-[#6FA1AF]/10 border border-[#6FA1AF]/20 px-3 py-2 space-y-0.5">
+                <p className="text-xs text-[#6FA1AF]">
+                  PriceLabs: base {plHint.base != null ? `$${plHint.base}` : "—"}
+                  {plHint.min != null ? ` · min $${plHint.min}` : ""}
+                  {" · "}{plHint.listing_name}
+                </p>
+                {plHint.push_enabled && (
+                  <p className="text-xs text-muted-foreground">Dynamic pricing is active — PriceLabs adjusts this price daily</p>
+                )}
+              </div>
+            ) : null
+          )}
 
           {/* Reason */}
           <div className="space-y-1.5">

@@ -30,6 +30,12 @@ export const CHANGE_TYPES: ChangeTypeValue[] = [
   "title","description","photos","amenity","other",
 ]
 
+// Change types that cannot be applied via the PriceLabs API — must be logged manually
+export const MANUAL_ONLY_CHANGE_TYPES: ReadonlySet<ChangeTypeValue> = new Set([
+  "min_stay",
+  "price_override",
+])
+
 export type ListingChange = {
   id               : string
   property_id      : string

@@ -5,6 +5,7 @@ import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { updatePriceLabsListings } from "@/lib/pricelabs"
+import { MANUAL_ONLY_CHANGE_TYPES } from "@/lib/change-impact"
 import type { ChangeTypeValue } from "@/lib/change-impact"
 
 async function getAdminUser() {
@@ -146,7 +147,7 @@ export async function rejectProposal(
 
 export async function applyProposal(
   id: string,
-): Promise<{ ok?: boolean; dryRun?: boolean; error?: string }> {
+): Promise<{ ok?: boolean; error?: string }> {
   const user = await getAdminUser()
   if (!user) return { error: "Forbidden" }
 
@@ -154,20 +155,56 @@ export async function applyProposal(
 
   const { data: proposal } = await (admin as any)
     .from("proposed_changes")
-    .select(`
-      *,
-      properties ( pricelabs_listing_id, pricelabs_price_floor )
-    `)
+    .select(`*, properties ( pricelabs_listing_id, pricelabs_price_floor )`)
     .eq("id", id)
     .eq("status", "approved")
     .single()
 
   if (!proposal) return { error: "Proposal not found or not approved" }
 
+  // Block change types that cannot be applied via the API
+  if (MANUAL_ONLY_CHANGE_TYPES.has(proposal.change_type)) {
+    return { error: `${proposal.change_type} changes cannot be applied via the PriceLabs API — use 'I applied this manually'` }
+  }
+
+  // Block if writes are disabled — dry-run must NOT mark the proposal as applied
+  const writesEnabled = (await getAppSetting(admin, "pricelabs_writes_enabled")) === "true"
+  if (!writesEnabled) {
+    return { error: "API writes are disabled — use 'I applied this manually' or enable writes in Settings → PriceLabs" }
+  }
+
   // Hidden property guardrail
   const hiddenIds = await getHiddenPropertyIds()
   if (hiddenIds.has(proposal.property_id)) {
     return { error: "Cannot apply changes to hidden properties" }
+  }
+
+  // Block if another pending or approved proposal exists for this property
+  const { data: activeSiblings } = await (admin as any)
+    .from("proposed_changes")
+    .select("id")
+    .eq("property_id", proposal.property_id)
+    .in("status", ["pending", "approved"])
+    .neq("id", id)
+    .limit(1)
+
+  if (activeSiblings?.length > 0) {
+    return { error: "Another proposal is already pending or approved for this property" }
+  }
+
+  // One-per-30-days: count only truly applied proposals (not dry-run, not failed/rejected)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const { data: recentApplied } = await (admin as any)
+    .from("proposed_changes")
+    .select("id")
+    .eq("property_id", proposal.property_id)
+    .eq("status", "applied")
+    .gte("applied_at", thirtyDaysAgo)
+    .neq("id", id)
+    .limit(1)
+
+  if (recentApplied?.length > 0) {
+    return { error: "A change was already applied to this property in the last 30 days" }
   }
 
   // Max change % guardrail
@@ -178,14 +215,11 @@ export async function applyProposal(
   if (!isNaN(current) && !isNaN(proposed) && current > 0) {
     const pct = Math.abs((proposed - current) / current) * 100
     if (pct > maxPct) {
-      await (admin as any)
-        .from("proposed_changes")
-        .update({
-          status    : "failed",
-          result    : { error: `Change of ${pct.toFixed(1)}% exceeds max ${maxPct}%` },
-          applied_at: new Date().toISOString(),
-        })
-        .eq("id", id)
+      await (admin as any).from("proposed_changes").update({
+        status: "failed",
+        result: { error: `Change of ${pct.toFixed(1)}% exceeds max ${maxPct}%` },
+        applied_at: new Date().toISOString(),
+      }).eq("id", id)
       revalidatePath("/proposals")
       return { error: `Change of ${pct.toFixed(1)}% exceeds max ${maxPct}%` }
     }
@@ -194,107 +228,73 @@ export async function applyProposal(
   // Price floor guardrail
   const floor = proposal.properties?.pricelabs_price_floor
   if (floor != null && !isNaN(proposed) && proposed < Number(floor)) {
-    await (admin as any)
-      .from("proposed_changes")
-      .update({
-        status    : "failed",
-        result    : { error: `Proposed $${proposed} is below floor $${floor}` },
-        applied_at: new Date().toISOString(),
-      })
-      .eq("id", id)
+    await (admin as any).from("proposed_changes").update({
+      status: "failed",
+      result: { error: `Proposed $${proposed} is below floor $${floor}` },
+      applied_at: new Date().toISOString(),
+    }).eq("id", id)
     revalidatePath("/proposals")
     return { error: `Proposed $${proposed} is below floor $${floor}` }
   }
 
-  // One-per-30-days guardrail
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const { data: recent } = await (admin as any)
-    .from("proposed_changes")
-    .select("id")
-    .eq("property_id", proposal.property_id)
-    .eq("status", "applied")
-    .gte("applied_at", thirtyDaysAgo)
-    .neq("id", id)
-    .limit(1)
-
-  if (recent && recent.length > 0) {
-    return { error: "A change was already applied to this property in the last 30 days" }
+  // Confirm listing ID is mapped
+  const listingId = proposal.properties?.pricelabs_listing_id
+  if (!listingId) {
+    return { error: "PriceLabs listing ID not mapped for this property — set it in Settings → PriceLabs" }
   }
 
-  // Determine dry-run mode
-  const writesEnabled = (await getAppSetting(admin, "pricelabs_writes_enabled")) === "true"
-  const isDryRun      = !writesEnabled
+  // Build a non-empty payload (guaranteed by blocking manual-only types above)
+  const apiKey = await getAppSetting(admin, "pricelabs_api_key")
+  if (!apiKey) return { error: "PriceLabs API key not configured" }
 
-  let result: Record<string, unknown> = {}
+  const payload  = proposal.payload as { listings?: Record<string, unknown>[] }
+  const listings = (payload?.listings ?? []).map((l: Record<string, unknown>) => ({
+    ...l,
+    id: listingId,
+  }))
 
-  if (!isDryRun) {
-    const apiKey = await getAppSetting(admin, "pricelabs_api_key")
-    if (!apiKey) return { error: "PriceLabs API key not configured" }
-
-    const listingId = proposal.properties?.pricelabs_listing_id
-    if (!listingId) {
-      return { error: "PriceLabs listing ID not mapped for this property — set it in Settings → PriceLabs" }
-    }
-
-    const payload  = proposal.payload as { listings?: Record<string, unknown>[] }
-    const listings = (payload?.listings ?? []).map((l: Record<string, unknown>) => ({
-      ...l,
-      id: listingId,
-    }))
-
-    const plRes = await updatePriceLabsListings(apiKey, listings as any)
-    if (!plRes.ok) {
-      await (admin as any)
-        .from("proposed_changes")
-        .update({
-          status    : "failed",
-          result    : { error: plRes.error },
-          applied_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-      revalidatePath("/proposals")
-      return { error: plRes.error }
-    }
-    result = { raw: plRes.raw }
-  } else {
-    result = { dry_run: true, payload: proposal.payload }
+  if (listings.length === 0 || !listings.some(l => Object.keys(l).some(k => !["id","pms"].includes(k)))) {
+    return { error: "Proposal has no price fields to update — re-create the proposal" }
   }
 
-  // Mark applied
-  await (admin as any)
-    .from("proposed_changes")
-    .update({
-      status    : "applied",
-      result,
-      decided_by: user.id,
-      decided_at: new Date().toISOString(),
+  const plRes = await updatePriceLabsListings(apiKey, listings as any)
+  if (!plRes.ok) {
+    await (admin as any).from("proposed_changes").update({
+      status: "failed",
+      result: { error: plRes.error },
       applied_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-
-  // Only create a listing_change when the live PriceLabs write succeeded
-  if (!isDryRun) {
-    await (admin as any)
-      .from("listing_changes")
-      .insert({
-        property_id      : proposal.property_id,
-        change_type      : proposal.change_type,
-        label            : proposal.label,
-        before_value     : proposal.current_value,
-        after_value      : proposal.proposed_value,
-        reason           : proposal.reason,
-        recommendation_id: proposal.recommendation_id,
-        source           : "pricelabs_api",
-        applied_at       : new Date().toISOString().slice(0, 10),
-        applied_by       : user.id,
-        status           : "active",
-      })
-    revalidatePath("/changes")
-    revalidatePath("/properties")
+    }).eq("id", id)
+    revalidatePath("/proposals")
+    return { error: plRes.error }
   }
+
+  // Mark applied and create listing_change
+  await (admin as any).from("proposed_changes").update({
+    status    : "applied",
+    result    : { raw: plRes.raw },
+    decided_by: user.id,
+    decided_at: new Date().toISOString(),
+    applied_at: new Date().toISOString(),
+  }).eq("id", id)
+
+  await (admin as any).from("listing_changes").insert({
+    property_id      : proposal.property_id,
+    change_type      : proposal.change_type,
+    label            : proposal.label,
+    before_value     : proposal.current_value,
+    after_value      : proposal.proposed_value,
+    reason           : proposal.reason,
+    recommendation_id: proposal.recommendation_id,
+    source           : "pricelabs_api",
+    applied_at       : new Date().toISOString().slice(0, 10),
+    applied_by       : user.id,
+    status           : "active",
+  })
 
   revalidatePath("/proposals")
-  return { ok: true, dryRun: isDryRun }
+  revalidatePath("/changes")
+  revalidatePath("/properties")
+  return { ok: true }
 }
 
 export async function markProposalAppliedManually(

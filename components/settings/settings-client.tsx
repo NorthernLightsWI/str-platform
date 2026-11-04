@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import {
   Eye, EyeOff, Check, X, Loader2, RefreshCw, Plus, Trash2,
-  Plug, Users, Database, Building2, Mail, Send,
+  Plug, Users, Database, Building2, Mail, Send, Wand2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -19,6 +19,8 @@ import {
   setHiddenProperties,
   setPropertyParent,
   savePriceLabsPropertySettings,
+  fetchPriceLabsListings,
+  testPriceLabsTagWrite,
 } from "@/app/actions/settings"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -386,10 +388,35 @@ function PriceLabsAutomationCard({ initial }: { initial: SettingsData }) {
 
 // ── PriceLabs mapping tab ─────────────────────────────────────────────────────
 
+type PlListing = { id: string; name: string; base: number | null; min: number | null; pms: string }
+type Suggestion = { propertyId: string; propertyName: string; plId: string; plName: string; score: number }
+
+function jaccardSim(a: string, b: string): number {
+  const tok = (s: string) => new Set(
+    s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean)
+  )
+  const A = tok(a); const B = tok(b)
+  const inter = [...A].filter(x => B.has(x)).length
+  const union  = new Set([...A, ...B]).size
+  return union === 0 ? 0 : inter / union
+}
+
 function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLabsPropertyRow[] }) {
-  const [rows,    setRows]    = useState(initialProperties)
-  const [saving,  startSave]  = useTransition()
-  const [result,  setResult]  = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+  const [rows,       setRows]       = useState(initialProperties)
+  const [saving,     startSave]     = useTransition()
+  const [result,     setResult]     = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  // Suggest matches state
+  const [plListings,  setPlListings]  = useState<PlListing[]>([])
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [dismissed,   setDismissed]   = useState<Set<string>>(new Set())
+  const [suggesting,  startSuggest]   = useTransition()
+  const [suggestErr,  setSuggestErr]  = useState<string | null>(null)
+
+  // Tag test state
+  const [tagListingId, setTagListingId] = useState("")
+  const [tagTesting,   setTagTesting]   = useState(false)
+  const [tagResult,    setTagResult]    = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
   function setRow(id: string, field: "pricelabs_listing_id" | "pricelabs_price_floor", value: string) {
     setRows(prev => prev.map(r =>
@@ -402,6 +429,53 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
     ))
   }
 
+  function handleSuggest() {
+    setSuggestErr(null)
+    startSuggest(async () => {
+      const res = await fetchPriceLabsListings()
+      if (!res.ok) { setSuggestErr(res.error); return }
+
+      setPlListings(res.listings)
+      setDismissed(new Set())
+
+      const unmapped = rows.filter(r => !r.pricelabs_listing_id)
+      const suggs: Suggestion[] = []
+      for (const prop of unmapped) {
+        let best: { plId: string; plName: string; score: number } | null = null
+        for (const pl of res.listings) {
+          const score = jaccardSim(prop.name, pl.name)
+          if (score > 0.1 && (!best || score > best.score)) {
+            best = { plId: pl.id, plName: pl.name, score }
+          }
+        }
+        if (best) suggs.push({ propertyId: prop.id, propertyName: prop.name, ...best })
+      }
+
+      setSuggestions(suggs)
+      if (suggs.length === 0 && unmapped.length > 0) {
+        setSuggestErr("No confident matches found — try mapping manually")
+      }
+    })
+  }
+
+  function acceptSuggestion(s: Suggestion) {
+    setRows(prev => prev.map(r => r.id !== s.propertyId ? r : { ...r, pricelabs_listing_id: s.plId }))
+    setDismissed(d => new Set([...d, s.propertyId]))
+  }
+
+  const activeSuggestions = suggestions.filter(s => !dismissed.has(s.propertyId))
+  const mappedPlIds       = new Set(rows.map(r => r.pricelabs_listing_id).filter(Boolean))
+  const unmatchedPl       = plListings.filter(pl => !mappedPlIds.has(pl.id))
+
+  async function handleTagTest(action: "add" | "remove") {
+    if (!tagListingId) return
+    setTagTesting(true)
+    setTagResult(null)
+    const res = await testPriceLabsTagWrite(tagListingId, action)
+    setTagResult(res)
+    setTagTesting(false)
+  }
+
   return (
     <div className="space-y-4">
       <Card title="PriceLabs Listing Mapping">
@@ -409,6 +483,63 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
           Map each property to its PriceLabs listing ID. Set an optional price floor to block
           proposals that would go below that value.
         </p>
+
+        {/* Suggest matches */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleSuggest}
+            disabled={suggesting}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
+            Suggest matches
+          </button>
+          {suggestErr && <span className="text-xs text-red-400">{suggestErr}</span>}
+        </div>
+
+        {/* Suggestions panel */}
+        {activeSuggestions.length > 0 && (
+          <div className="rounded-lg border border-[#E88159]/30 bg-[#E88159]/5 p-3 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              {activeSuggestions.length} suggested match{activeSuggestions.length !== 1 ? "es" : ""}
+            </p>
+            {activeSuggestions.map(s => (
+              <div key={s.propertyId} className="flex items-center justify-between gap-3 rounded-lg bg-background/60 px-3 py-2">
+                <div className="min-w-0 text-sm">
+                  <span className="text-foreground">{s.propertyName}</span>
+                  <span className="mx-1.5 text-muted-foreground">→</span>
+                  <span className="text-[#6FA1AF]">{s.plName}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">({Math.round(s.score * 100)}% match)</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => acceptSuggestion(s)}
+                    className="flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    <Check className="size-3" /> Accept
+                  </button>
+                  <button
+                    onClick={() => setDismissed(d => new Set([...d, s.propertyId]))}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    <X className="size-3" /> Skip
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Unmatched PL listings */}
+        {plListings.length > 0 && unmatchedPl.length > 0 && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-1">
+            <p className="text-xs font-medium text-amber-400">
+              {unmatchedPl.length} PriceLabs listing{unmatchedPl.length !== 1 ? "s" : ""} not matched to any property
+            </p>
+            <p className="text-xs text-muted-foreground">{unmatchedPl.map(pl => pl.name).join(", ")}</p>
+          </div>
+        )}
+
         <div className="space-y-2">
           <div className="grid grid-cols-[1fr_1fr_120px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <span>Property</span>
@@ -441,8 +572,8 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             onClick={() => startSave(async () => {
               setResult(null)
               const r = await savePriceLabsPropertySettings(rows.map(row => ({
-                id                  : row.id,
-                pricelabs_listing_id: row.pricelabs_listing_id,
+                id                   : row.id,
+                pricelabs_listing_id : row.pricelabs_listing_id,
                 pricelabs_price_floor: row.pricelabs_price_floor,
               })))
               setResult(r.error ? r : { ok: true, message: "Saved" })
@@ -454,6 +585,51 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             Save all
           </button>
           <ActionMsg result={result} />
+        </div>
+      </Card>
+
+      {/* Tag write test */}
+      <Card title="Test Write Connection">
+        <p className="text-xs text-muted-foreground">
+          Verify that the PriceLabs API key has write access by adding and removing a test tag
+          on a listing. The tag "claude-test" does not affect pricing.
+        </p>
+        <Field label="PriceLabs Listing">
+          {plListings.length > 0 ? (
+            <select
+              value={tagListingId}
+              onChange={e => setTagListingId(e.target.value)}
+              className="w-full rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 outline-none focus-visible:border-ring"
+            >
+              <option value="">Select a listing…</option>
+              {plListings.map(pl => (
+                <option key={pl.id} value={pl.id}>{pl.name} ({pl.id})</option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Click "Suggest matches" above to load PriceLabs listings first.
+            </p>
+          )}
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => handleTagTest("add")}
+            disabled={tagTesting || !tagListingId}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {tagTesting ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            Add claude-test tag
+          </button>
+          <button
+            onClick={() => handleTagTest("remove")}
+            disabled={tagTesting || !tagListingId}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {tagTesting ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+            Remove claude-test tag
+          </button>
+          <ActionMsg result={tagResult} />
         </div>
       </Card>
     </div>

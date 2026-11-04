@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { runOwnerRezSync }   from "@/lib/sync/ownerrez"
 import { runReviewsSync }    from "@/lib/sync/reviews"
 import { runAmenitiesSync }  from "@/lib/sync/amenities"
+import { getPriceLabsListings, updateListingTags } from "@/lib/pricelabs"
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -175,6 +176,131 @@ export async function testPriceLabsConnection(apiKey: string) {
     return { ok: true, message: "Connected to PriceLabs" }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Connection failed" }
+  }
+}
+
+// ── PriceLabs read / write helpers ───────────────────────────────────────────
+
+async function getPriceLabsApiKey(admin: ReturnType<typeof createAdminClient>): Promise<string | null> {
+  const { data } = await admin.from("app_settings").select("value").eq("key", "pricelabs_api_key").single()
+  if (!data) return null
+  const v = data.value
+  if (typeof v === "string") return v || null
+  if (v === null || v === undefined) return null
+  try { return String(JSON.parse(String(v))) || null } catch { return String(v) || null }
+}
+
+export async function fetchPriceLabsListings(): Promise<
+  | { ok: true;  listings: { id: string; name: string; base: number | null; min: number | null; pms: string }[] }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const admin  = createAdminClient()
+    const apiKey = await getPriceLabsApiKey(admin)
+    if (!apiKey) return { ok: false, error: "PriceLabs API key not configured" }
+
+    const result = await getPriceLabsListings(apiKey)
+    if (!result.ok) return result
+
+    return {
+      ok      : true,
+      listings: result.listings.map(l => ({
+        id  : l.id,
+        name: l.name,
+        base: l.base,
+        min : l.min,
+        pms : l.pms,
+      })),
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to fetch PriceLabs listings" }
+  }
+}
+
+export async function testPriceLabsTagWrite(
+  listingId: string,
+  action   : "add" | "remove",
+): Promise<{ ok?: boolean; error?: string; message?: string }> {
+  try {
+    await requireAdmin()
+    const admin  = createAdminClient()
+    const apiKey = await getPriceLabsApiKey(admin)
+    if (!apiKey) return { error: "PriceLabs API key not configured" }
+
+    // Fetch current tags so we don't clobber existing ones
+    const fetchResult = await getPriceLabsListings(apiKey)
+    if (!fetchResult.ok) return { error: fetchResult.error }
+
+    const listing = fetchResult.listings.find(l => l.id === listingId)
+    if (!listing) return { error: `Listing ${listingId} not found in PriceLabs account` }
+
+    const TEST_TAG    = "claude-test"
+    const currentTags = listing.tags ?? []
+    let newTags: string[]
+
+    if (action === "add") {
+      if (currentTags.includes(TEST_TAG)) return { ok: true, message: "Tag already present" }
+      if (currentTags.length >= 10) return { error: "Listing already has 10 tags (PriceLabs maximum)" }
+      newTags = [...currentTags, TEST_TAG]
+    } else {
+      newTags = currentTags.filter(t => t !== TEST_TAG)
+      if (newTags.length === currentTags.length) return { ok: true, message: "Tag was not present" }
+    }
+
+    const writeResult = await updateListingTags(apiKey, listingId, listing.pms, newTags)
+    if (!writeResult.ok) return { error: writeResult.error }
+
+    return {
+      ok     : true,
+      message: action === "add"
+        ? `Tag 'claude-test' added to "${listing.name}"`
+        : `Tag 'claude-test' removed from "${listing.name}"`,
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed" }
+  }
+}
+
+export async function getPropertyPlPrice(propertyId: string): Promise<{
+  base        : number | null
+  min         : number | null
+  max         : number | null
+  push_enabled: boolean
+  listing_name: string
+  listing_id  : string
+} | null> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+
+    const { data: prop } = await (admin as any)
+      .from("properties")
+      .select("pricelabs_listing_id")
+      .eq("id", propertyId)
+      .single()
+
+    if (!prop?.pricelabs_listing_id) return null
+
+    const apiKey = await getPriceLabsApiKey(admin)
+    if (!apiKey) return null
+
+    const result = await getPriceLabsListings(apiKey)
+    if (!result.ok) return null
+
+    const listing = result.listings.find(l => l.id === prop.pricelabs_listing_id)
+    if (!listing) return null
+
+    return {
+      base        : listing.base,
+      min         : listing.min,
+      max         : listing.max,
+      push_enabled: listing.push_enabled,
+      listing_name: listing.name,
+      listing_id  : listing.id,
+    }
+  } catch {
+    return null
   }
 }
 

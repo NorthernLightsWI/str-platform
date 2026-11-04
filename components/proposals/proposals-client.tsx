@@ -7,7 +7,7 @@ import {
   Clock, CheckCheck, Ban, AlertTriangle, Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { CHANGE_TYPE_LABELS } from "@/lib/change-impact"
+import { CHANGE_TYPE_LABELS, MANUAL_ONLY_CHANGE_TYPES } from "@/lib/change-impact"
 import type { ChangeTypeValue } from "@/lib/change-impact"
 import {
   approveProposal, rejectProposal, applyProposal, markProposalAppliedManually,
@@ -78,13 +78,12 @@ function ProposalCard({
   const [pending,       startTransition]  = useTransition()
   const [manualPending, startManualTrans] = useTransition()
 
-  function act(fn: () => Promise<{ ok?: boolean; dryRun?: boolean; error?: string }>, successMsg: string) {
+  function act(fn: () => Promise<{ ok?: boolean; error?: string }>, successMsg: string) {
     setActionMsg(null)
     startTransition(async () => {
       const res = await fn()
       if (res.error) { setActionMsg(`Error: ${res.error}`); return }
-      const msg = res.dryRun ? `${successMsg} (dry-run — writes are off)` : successMsg
-      setActionMsg(msg)
+      setActionMsg(successMsg)
       onRefresh()
     })
   }
@@ -171,7 +170,12 @@ function ProposalCard({
         {proposal.status === "approved" && (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              {writesEnabled && (
+              {MANUAL_ONLY_CHANGE_TYPES.has(proposal.change_type) ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <Zap className="size-3.5" />
+                  Manual only — cannot apply via API
+                </span>
+              ) : writesEnabled ? (
                 <button
                   onClick={() => act(() => applyProposal(proposal.id), "Applied to PriceLabs")}
                   className="flex items-center gap-1.5 rounded-lg bg-[#E88159]/10 border border-[#E88159]/20 px-3 py-1.5 text-xs font-medium text-[#E88159] hover:bg-[#E88159]/20 transition-colors"
@@ -179,7 +183,7 @@ function ProposalCard({
                   <Zap className="size-3.5" />
                   Apply to PriceLabs
                 </button>
-              )}
+              ) : null}
               <button
                 onClick={() => { setManualOpen(o => !o); setActionMsg(null) }}
                 className="flex items-center gap-1.5 rounded-lg bg-[#6FA1AF]/10 border border-[#6FA1AF]/20 px-3 py-1.5 text-xs font-medium text-[#6FA1AF] hover:bg-[#6FA1AF]/20 transition-colors"
@@ -304,7 +308,7 @@ export function ProposalsClient({
         {!writesEnabled && (
           <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 text-xs text-amber-400">
             <AlertTriangle className="size-3.5 shrink-0" />
-            Live writes are off — proposals will apply in dry-run mode
+            Live writes are off — approved proposals must be applied manually or via Settings → PriceLabs
           </div>
         )}
         <div className="ml-auto">
