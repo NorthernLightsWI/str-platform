@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useEffect } from "react"
 import {
   Eye, EyeOff, Check, X, Loader2, RefreshCw, Plus, Trash2,
   Plug, Users, Database, Building2, Mail, Send, Wand2, BarChart2, Activity,
@@ -426,8 +426,20 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
   const [saving,     startSave]     = useTransition()
   const [result,     setResult]     = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
+  // PriceLabs listings — auto-loaded on mount so dropdowns and name checks are ready immediately
+  const [plListings,      setPlListings]      = useState<PlListing[]>([])
+  const [loadingListings, setLoadingListings] = useState(true)
+  const [listingsLoadErr, setListingsLoadErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchPriceLabsListings().then(res => {
+      if (res.ok) setPlListings(res.listings)
+      else setListingsLoadErr(res.error)
+      setLoadingListings(false)
+    })
+  }, [])
+
   // Suggest matches state
-  const [plListings,  setPlListings]  = useState<PlListing[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [dismissed,   setDismissed]   = useState<Set<string>>(new Set())
   const [suggesting,  startSuggest]   = useTransition()
@@ -593,6 +605,8 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             {suggestingFloors ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
             Suggest floors
           </button>
+          {loadingListings && <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="size-3 animate-spin" />Loading listings…</span>}
+          {listingsLoadErr && <span className="text-xs text-red-400">{listingsLoadErr}</span>}
           {suggestErr      && <span className="text-xs text-red-400">{suggestErr}</span>}
           {floorSuggestErr && <span className="text-xs text-red-400">{floorSuggestErr}</span>}
           {floorSuggestMsg && <span className="text-xs text-[#6FA1AF]">{floorSuggestMsg}</span>}
@@ -652,16 +666,36 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
           </div>
           {rows.map(r => {
             const pl = plListings.find(l => l.id === r.pricelabs_listing_id)
+            // Name mismatch: Jaccard < 0.15 means very few shared tokens
+            const nameMismatch = !!pl && jaccardSim(r.name, pl.name) < 0.15
+            // ID typed but not found once listings have loaded
+            const idNotFound = !!r.pricelabs_listing_id && !pl && !loadingListings && plListings.length > 0
             return (
               <div key={r.id} className="grid grid-cols-[1fr_1fr_90px_68px_68px_32px] gap-3 items-center">
                 <span className="text-sm text-foreground truncate">{r.name}</span>
-                <input
-                  type="text"
-                  value={r.pricelabs_listing_id ?? ""}
-                  onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
-                  placeholder="e.g. 12345"
-                  className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
-                />
+                {/* Listing ID column: input + PL name/warning below — self-start so other cells stay centered */}
+                <div className="self-start">
+                  <input
+                    type="text"
+                    value={r.pricelabs_listing_id ?? ""}
+                    onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
+                    placeholder="e.g. 12345"
+                    className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                  />
+                  {pl && (
+                    <div className="mt-0.5 flex items-center gap-1 min-w-0">
+                      <span className="text-xs text-[#6FA1AF] truncate">{pl.name}</span>
+                      {nameMismatch && (
+                        <span className="text-xs text-red-400 shrink-0" title="PriceLabs name looks very different from the property name — verify this is the right listing">
+                          ⚠ name mismatch
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {idNotFound && (
+                    <p className="mt-0.5 text-xs text-red-400">ID not found in account</p>
+                  )}
+                </div>
                 <input
                   type="number"
                   min={0}
@@ -673,14 +707,15 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
                 {/* PL Min — shown once listings are loaded; amber if null */}
                 <span className={cn(
                   "text-xs font-mono",
+                  loadingListings ? "text-muted-foreground" :
                   !pl ? "text-muted-foreground" :
                   pl.min == null ? "text-amber-400" : "text-foreground"
                 )}>
-                  {!pl ? "—" : pl.min != null ? `$${pl.min}` : "none"}
+                  {loadingListings ? "…" : !pl ? "—" : pl.min != null ? `$${pl.min}` : "none"}
                 </span>
                 {/* PL Base — labeled source-unknown per API (no base_type field) */}
                 <span className="text-xs font-mono text-muted-foreground" title="Source unknown — PriceLabs API does not indicate whether this is user-set or calculated">
-                  {!pl ? "—" : pl.base != null ? `$${pl.base}` : "—"}
+                  {loadingListings ? "…" : !pl ? "—" : pl.base != null ? `$${pl.base}` : "—"}
                 </span>
                 <button
                   title="Verify prices (read-only, next 30 days)"
@@ -755,16 +790,24 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
                           <tr key={d.date} className={cn(
                             "border-t border-border/30",
                             d.flag === "null_price" || d.flag === "zero_price" ? "bg-red-500/5" :
-                            d.flag === "big_jump" ? "bg-amber-500/5" : ""
+                            d.flag === "big_jump" || d.flag === "pms_drift" ? "bg-amber-500/5" : ""
                           )}>
                             <td className="py-0.5 px-2 text-foreground">{d.date}</td>
                             <td className="py-0.5 px-2 text-right">{d.price != null ? `$${d.price}` : "—"}</td>
-                            <td className="py-0.5 px-2 text-right text-muted-foreground">{d.user_price != null ? `$${d.user_price}` : "—"}</td>
+                            {/* user_price === -1 means "not yet seen on PMS" per API docs — show as — */}
+                            <td className="py-0.5 px-2 text-right text-muted-foreground">
+                              {d.user_price != null && d.user_price !== -1 ? `$${d.user_price}` : "—"}
+                            </td>
                             <td className="py-0.5 px-2 text-right text-muted-foreground">{d.booking_status ?? "—"}</td>
                             <td className="py-0.5 px-2">
                               {d.flag === "null_price" && <span className="text-red-400">null price</span>}
                               {d.flag === "zero_price" && <span className="text-red-400">$0</span>}
                               {d.flag === "big_jump"   && <span className="text-amber-400">≥50% jump</span>}
+                              {d.flag === "pms_drift"  && (
+                                <span className="text-amber-400" title="PMS has a different price than PriceLabs on this non-booked day — push may be pending or overridden">
+                                  PMS drift
+                                </span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -819,7 +862,7 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             </select>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Click "Suggest matches" above to load PriceLabs listings first.
+              {loadingListings ? "Loading PriceLabs listings…" : listingsLoadErr ?? "No PriceLabs listings found."}
             </p>
           )}
         </Field>
@@ -849,7 +892,7 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             </select>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Click "Suggest matches" above to load PriceLabs listings first.
+              {loadingListings ? "Loading PriceLabs listings…" : listingsLoadErr ?? "No PriceLabs listings found."}
             </p>
           )}
         </Field>

@@ -257,7 +257,8 @@ export type VerifyPricesDay = {
   price         : number | null
   user_price    : number | null
   booking_status: string | null
-  flag?         : "null_price" | "zero_price" | "big_jump"
+  // pms_drift: user_price is a valid positive price that differs from PL price on a non-booked day
+  flag?         : "null_price" | "zero_price" | "big_jump" | "pms_drift"
 }
 
 export async function verifyPriceLabsPrices(
@@ -312,6 +313,14 @@ export async function verifyPriceLabsPrices(
         if (prev != null && prev > 0 && Math.abs((price - prev) / prev) >= 0.5) {
           flag = "big_jump"
         }
+      }
+      // pms_drift: user_price > 0, differs from PL price, on a non-booked day.
+      // user_price === -1 means "not seen on PMS yet" per API docs — not a drift.
+      if (!flag && price != null && price > 0 &&
+          d.user_price != null && d.user_price > 0 && d.user_price !== price) {
+        const booked = typeof d.booking_status === "string" &&
+          d.booking_status.toLowerCase().includes("booked")
+        if (!booked) flag = "pms_drift"
       }
       return { date: d.date, price: d.price, user_price: d.user_price, booking_status: d.booking_status, flag }
     })
