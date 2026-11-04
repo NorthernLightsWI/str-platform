@@ -12,6 +12,7 @@
   ],
   "prefixes": [
     "supabase/migrations/",
-    "scripts/"
+    "scripts/",
+    "lib/sync/"
   ]
 }

@@ -6,32 +6,25 @@
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT false;
 
 -- ── 2. Backfill from app_settings ─────────────────────────
--- app_settings.value is JSONB; we need to handle both JSONB array and
--- text-encoded JSON string shapes that may exist in older rows.
-DO $$
-DECLARE
-  raw_val jsonb;
-BEGIN
-  SELECT value INTO raw_val
-  FROM app_settings
-  WHERE key = 'hidden_properties'
-  LIMIT 1;
-
-  IF raw_val IS NOT NULL AND jsonb_typeof(raw_val) = 'array' THEN
-    UPDATE properties
-    SET is_hidden = true
-    WHERE id::text IN (
-      SELECT jsonb_array_elements_text(raw_val)
-    );
-  ELSIF raw_val IS NOT NULL AND jsonb_typeof(raw_val) = 'string' THEN
-    -- Value stored as a JSON-encoded string: '"[\"uuid1\",\"uuid2\"]"'
-    UPDATE properties
-    SET is_hidden = true
-    WHERE id::text IN (
-      SELECT jsonb_array_elements_text(raw_val::text::jsonb)
-    );
-  END IF;
-END $$;
+-- app_settings.value may be:
+--   JSONB array:  ["uuid1","uuid2"]          → jsonb_typeof = 'array'
+--   JSONB string: "[\"uuid1\",\"uuid2\"]"    → jsonb_typeof = 'string'
+--     (produced when JS JSON.stringify result is stored as JSONB string)
+--     #>> '{}' extracts the text content, then we cast back to jsonb.
+-- Using pure SQL (no PL/pgSQL) to avoid SRF-in-subquery edge cases.
+UPDATE properties p
+SET is_hidden = true
+WHERE p.id::text IN (
+  SELECT jsonb_array_elements_text(
+    CASE
+      WHEN jsonb_typeof(s.value) = 'array'  THEN s.value
+      WHEN jsonb_typeof(s.value) = 'string' THEN (s.value #>> '{}')::jsonb
+      ELSE '[]'::jsonb
+    END
+  )
+  FROM app_settings s
+  WHERE s.key = 'hidden_properties'
+);
 
 -- ── 3. visible_properties ──────────────────────────────────
 CREATE OR REPLACE VIEW visible_properties

@@ -53,7 +53,7 @@ function isAllowlisted(relPath) {
 
 function walkDir(dir, out = []) {
   for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === ".next" || entry === ".git") continue
+    if (entry === "node_modules" || entry === ".next" || entry === ".git" || entry === ".claude") continue
     const full = join(dir, entry)
     const st   = statSync(full)
     if (st.isDirectory()) {
