@@ -11,7 +11,7 @@ export default async function MaintenancePage() {
       .from("maintenance_issues")
       .select(`
         id, property_id, title, description, category, priority, status,
-        notes, reporter_name, created_at, resolved_at,
+        notes, images, reporter_name, created_at, resolved_at,
         properties(external_name, internal_name)
       `)
       .order("created_at", { ascending: false }),
@@ -34,6 +34,7 @@ export default async function MaintenancePage() {
     priority      : string | null
     status        : string
     notes         : string | null
+    images        : string[] | null
     reporter_name : string | null
     created_at    : string
     resolved_at   : string | null
@@ -50,6 +51,7 @@ export default async function MaintenancePage() {
     priority      : r.priority ?? "low",
     status        : r.status,
     notes         : r.notes,
+    images        : r.images ?? null,
     created_at    : r.created_at,
     resolved_at   : r.resolved_at,
     property_name : r.properties

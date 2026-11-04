@@ -13,6 +13,7 @@ export type IssueData = {
   priority      : string
   status        : string
   notes         : string | null
+  images        : string[] | null
   created_at    : string
   resolved_at   : string | null
   property_name : string
@@ -134,6 +135,20 @@ export function IssueCard({ issue }: { issue: IssueData }) {
           <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
             {issue.description}
           </p>
+        )}
+
+        {issue.images && issue.images.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {issue.images.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                <img
+                  src={url}
+                  alt={`Photo ${i + 1}`}
+                  className="size-16 rounded-lg object-cover border border-border hover:opacity-80 transition-opacity"
+                />
+              </a>
+            ))}
+          </div>
         )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

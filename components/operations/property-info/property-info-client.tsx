@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils"
 import {
   upsertPropertyInfo,
-  uploadLockboxPhoto,
+  saveLockboxPhotoUrl,
   addVendorContact,
   updateVendorContact,
   deleteVendorContact,
@@ -19,6 +19,7 @@ import {
   markRecurringComplete,
   deleteRecurringItem,
 } from "@/app/actions/property-info"
+import { compressImage, uploadPropertyPhoto } from "@/lib/image-upload"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -328,10 +329,10 @@ function AccessEntrySection({
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Photo state
-  const [photoUrl, setPhotoUrl]       = useState<string | null>(base.lockbox_photo_url)
-  const [lightboxOpen, setLightboxOpen] = useState(false)
-  const [uploading, setUploading]       = useState(false)
-  const [uploadError, setUploadError]   = useState<string | null>(null)
+  const [photoUrl, setPhotoUrl]           = useState<string | null>(base.lockbox_photo_url)
+  const [lightboxOpen, setLightboxOpen]   = useState(false)
+  const [uploadPhase, setUploadPhase]     = useState<"compressing" | "uploading" | null>(null)
+  const [uploadError, setUploadError]     = useState<string | null>(null)
 
   // WiFi password visibility (read mode only)
   const [showPassword, setShowPassword] = useState(false)
@@ -367,16 +368,22 @@ function AccessEntrySection({
   async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    setUploading(true)
-    setUploadError(null)
-    const fd = new FormData()
-    fd.append("photo", file)
-    const res = await uploadLockboxPhoto(property.id, fd)
-    setUploading(false)
-    if (res?.error) { setUploadError(res.error); return }
-    if (res?.url) setPhotoUrl(res.url)
-    // reset the input so the same file can be re-selected
     e.target.value = ""
+    setUploadPhase("compressing")
+    setUploadError(null)
+    try {
+      const blob = await compressImage(file)
+      setUploadPhase("uploading")
+      const path = `lockbox/${property.id}/${Date.now()}.jpg`
+      const url  = await uploadPropertyPhoto(blob, path)
+      const res  = await saveLockboxPhotoUrl(property.id, url)
+      if (res?.error) throw new Error(res.error)
+      setPhotoUrl(url)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed, try again")
+    } finally {
+      setUploadPhase(null)
+    }
   }
 
   // ── Photo thumbnail (used in both read and edit mode) ─────────────────────
@@ -412,16 +419,16 @@ function AccessEntrySection({
       {canEdit && (
         <label className={cn(
           "flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors",
-          uploading && "opacity-50 pointer-events-none",
+          uploadPhase !== null && "opacity-50 pointer-events-none",
         )}>
-          {uploading ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />}
-          {uploading ? "Uploading…" : "Upload Photo"}
+          {uploadPhase !== null ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />}
+          {uploadPhase === "compressing" ? "Compressing…" : uploadPhase === "uploading" ? "Uploading…" : "Upload Photo"}
           <input
             type="file"
             accept="image/*"
             className="sr-only"
             onChange={handlePhotoSelect}
-            disabled={uploading}
+            disabled={uploadPhase !== null}
           />
         </label>
       )}

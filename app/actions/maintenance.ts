@@ -16,6 +16,7 @@ export async function createIssue(data: {
   category     : string
   reporterName : string
   notes        : string
+  imageUrls?   : string[]
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -32,6 +33,7 @@ export async function createIssue(data: {
     category      : data.category.trim()     || null,
     notes         : data.notes.trim()        || null,
     status        : "open",
+    images        : data.imageUrls?.length ? data.imageUrls : null,
   } as any)
 
   if (error) return { error: error.message }
