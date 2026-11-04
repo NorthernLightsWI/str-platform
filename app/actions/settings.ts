@@ -613,7 +613,7 @@ export async function getPropertyBenchmarkTiers(
       }
     }
 
-    const plUsable = plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5
+    const plUsable = propType === "nightly" && plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5
     tiers.push({
       tier  : "(b)",
       label : "PriceLabs neighborhood",
@@ -622,13 +622,15 @@ export async function getPropertyBenchmarkTiers(
       revpar: plUsable ? Math.round(plData!.adr * plData!.occ) / 100 : null,
       comps : plData?.listingCount ?? 0,
       active: false,
-      note  : !plListingId
-        ? "No PriceLabs listing mapping"
-        : !plData
-          ? "Sync not enabled in PriceLabs"
-          : !plUsable
-            ? `Only ${plData.listingCount} nearby listings (need ≥5)`
-            : `${plData.listingCount} nearby listings`,
+      note  : propType !== "nightly"
+        ? "Weekly/monthly listing — PL tier skipped"
+        : !plListingId
+          ? "No PriceLabs listing mapping"
+          : !plData
+            ? "Sync not enabled in PriceLabs"
+            : !plUsable
+              ? `Only ${plData.listingCount} nearby listings (need ≥5)`
+              : `${plData.listingCount} listings · ${plData.monthsLabel ?? "6 months"}`,
     })
 
     // ── (c) Same beds + same type, ≥2 ────────────────────────────────────────

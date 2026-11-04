@@ -91,9 +91,10 @@ export type AggBooking = {
 
 export type PlNeighborhoodData = {
   adr         : number
-  occ         : number   // 0–100
+  occ         : number       // 0–100
   listingCount: number
-  fetchedAt   : string   // ISO timestamp
+  monthsLabel?: string       // which months were averaged, e.g. "Aug–Oct 2026 + Aug–Oct 2025"
+  fetchedAt   : string       // ISO timestamp
 }
 
 const PL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
@@ -150,14 +151,14 @@ export async function setPlNeighborhoodCache(
 // We use last 6 past-month entries where AvailDays ≤ 1500 (annual roll-ups have higher values).
 
 export function extractPlBenchmark(
-  payload : unknown,
+  payload  : unknown,
   _bedrooms: number | null,
 ): PlNeighborhoodData | null {
   try {
     const d = (payload as any)?.data
     if (!d?.["Market KPI"]) return null
 
-    const kpiSection = d["Market KPI"]
+    const kpiSection   = d["Market KPI"]
     // Category "0" = same bedrooms relative to listing
     const sameBedCat   = kpiSection.Category?.["0"]
     const sameBedCount = sameBedCat?.["Listings Used"] ?? 0
@@ -167,30 +168,69 @@ export function extractPlBenchmark(
       : (kpiSection.Category?.["All"] ?? sameBedCat)
     if (!kpiCat) return null
 
-    const xVals       : string[] = kpiCat.X_values ?? []
-    const availSeries              = kpiCat.Y_values?.[0]  // Total Available Days
-    const revSeries                = kpiCat.Y_values?.[3]  // Revenue
-    const bookedSeries             = kpiCat.Y_values?.[4]  // Total Booked Days
+    const xVals      : string[] = kpiCat.X_values ?? []
+    const availSeries            = kpiCat.Y_values?.[0]  // Total Available Days
+    const revSeries              = kpiCat.Y_values?.[3]  // Revenue
+    const bookedSeries           = kpiCat.Y_values?.[4]  // Total Booked Days
     if (!xVals.length || !availSeries || !revSeries || !bookedSeries) return null
 
     const today = new Date()
-    let totalRevenue = 0, totalBooked = 0, totalAvailable = 0, monthsUsed = 0
 
-    for (let i = xVals.length - 1; i >= 0 && monthsUsed < 6; i--) {
-      const monthDate = new Date(xVals[i] + " 1")
-      if (isNaN(monthDate.getTime()) || monthDate >= today) continue
+    // Collect all valid monthly entries, keyed by "YYYY-MM"
+    type MonthEntry = { key: string; avail: number; rev: number; booked: number }
+    const byKey = new Map<string, MonthEntry>()
+    for (let i = 0; i < xVals.length; i++) {
+      const md = new Date(xVals[i] + " 1")
+      if (isNaN(md.getTime()) || md >= today) continue
       const avail  = Number(availSeries[i]  ?? 0)
       const rev    = Number(revSeries[i]    ?? 0)
       const booked = Number(bookedSeries[i] ?? 0)
       // Skip zeros and annual roll-up entries (> 1500 days in a "month")
       if (avail <= 0 || avail > 1500 || booked <= 0) continue
-      totalRevenue   += rev
-      totalBooked    += booked
-      totalAvailable += avail
-      monthsUsed++
+      const key = `${md.getFullYear()}-${String(md.getMonth() + 1).padStart(2, "0")}`
+      byKey.set(key, { key, avail, rev, booked })
     }
 
-    if (monthsUsed < 2 || totalBooked <= 0 || totalAvailable <= 0) return null
+    if (byKey.size < 2) return null
+
+    // Sort newest first
+    const sorted = Array.from(byKey.values()).sort((a, b) => b.key.localeCompare(a.key))
+
+    // Primary: 3 most recent complete months + same 3 months last year
+    const recent = sorted.slice(0, 3)
+    const prior  = recent.map(m => {
+      const [y, mo] = m.key.split("-").map(Number)
+      return byKey.get(`${y - 1}-${String(mo).padStart(2, "0")}`) ?? null
+    })
+
+    let selected   : MonthEntry[]
+    let monthsLabel: string
+
+    if (recent.length === 3 && prior.every(p => p !== null)) {
+      selected = [...recent, ...(prior as MonthEntry[])]
+      // e.g. "Aug–Oct 2026 + Aug–Oct 2025"
+      const names      = recent.map(m =>
+        new Date(m.key + "-01").toLocaleDateString("en-US", { month: "short" })
+      )
+      const recentYear = Number(recent[0].key.slice(0, 4))
+      const range      = `${names[2]}–${names[0]}`
+      monthsLabel      = `${range} ${recentYear} + ${range} ${recentYear - 1}`
+    } else {
+      // Fallback: 6 most recent valid months
+      selected    = sorted.slice(0, 6)
+      monthsLabel = `${selected.length} most recent months`
+    }
+
+    if (selected.length < 2) return null
+
+    let totalRevenue = 0, totalBooked = 0, totalAvailable = 0
+    for (const m of selected) {
+      totalRevenue   += m.rev
+      totalBooked    += m.booked
+      totalAvailable += m.avail
+    }
+
+    if (totalBooked <= 0 || totalAvailable <= 0) return null
     const adr = totalRevenue   / totalBooked
     const occ = (totalBooked  / totalAvailable) * 100
     if (!isFinite(adr) || !isFinite(occ) || adr <= 0 || occ <= 0) return null
@@ -199,6 +239,7 @@ export function extractPlBenchmark(
       adr         : Math.round(adr * 100) / 100,
       occ         : Math.round(occ * 10)  / 10,
       listingCount: kpiCat["Listings Used"] ?? 0,
+      monthsLabel,
       fetchedAt   : new Date().toISOString(),
     }
   } catch {
@@ -274,8 +315,8 @@ export function computeBenchmark(params: {
   const propBedrooms = property.bedrooms
   const bookingMap   = new Map(aggBookings.map(b => [b.property_id, b]))
 
-  // ── (b) PriceLabs neighborhood data (cached, per listing) ─────────────────
-  if (plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5) {
+  // ── (b) PriceLabs neighborhood data (nightly only) ───────────────────────
+  if (propType === "nightly" && plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5) {
     return {
       adr            : plData.adr,
       occupancy      : plData.occ,
