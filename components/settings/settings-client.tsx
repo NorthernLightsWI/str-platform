@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import {
   Eye, EyeOff, Check, X, Loader2, RefreshCw, Plus, Trash2,
-  Plug, Users, Database, Building2, Mail, Send, Wand2, BarChart2,
+  Plug, Users, Database, Building2, Mail, Send, Wand2, BarChart2, Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -23,7 +23,10 @@ import {
   fetchPriceLabsListings,
   testPriceLabsTagWrite,
   getPropertyBenchmarkTiers,
+  verifyPriceLabsPrices,
+  getPriceLabsPushStatus,
   type TierResult,
+  type VerifyPricesDay,
 } from "@/app/actions/settings"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -435,6 +438,16 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
   const [tagTesting,   setTagTesting]   = useState(false)
   const [tagResult,    setTagResult]    = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
+  // Verify prices state (task 2)
+  const [verifyTarget, setVerifyTarget] = useState<{ id: string; name: string; pms: string } | null>(null)
+  const [verifying,    startVerify]     = useTransition()
+  const [verifyResult, setVerifyResult] = useState<Awaited<ReturnType<typeof verifyPriceLabsPrices>> | null>(null)
+
+  // Push status state (task 3)
+  const [pushListingId, setPushListingId] = useState("")
+  const [pushChecking,  startPushCheck]   = useTransition()
+  const [pushResult,    setPushResult]    = useState<Awaited<ReturnType<typeof getPriceLabsPushStatus>> | null>(null)
+
   function setRow(id: string, field: "pricelabs_listing_id" | "pricelabs_price_floor", value: string) {
     setRows(prev => prev.map(r =>
       r.id !== id ? r : {
@@ -491,6 +504,31 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
     const res = await testPriceLabsTagWrite(tagListingId, action)
     setTagResult(res)
     setTagTesting(false)
+  }
+
+  function handleVerifyPrices(r: PriceLabsPropertyRow) {
+    if (!r.pricelabs_listing_id) return
+    // Toggle off if already open for this listing
+    if (verifyTarget?.id === r.pricelabs_listing_id) {
+      setVerifyTarget(null); setVerifyResult(null); return
+    }
+    const pms = plListings.find(pl => pl.id === r.pricelabs_listing_id)?.pms ?? "ownerrez"
+    setVerifyTarget({ id: r.pricelabs_listing_id, name: r.name, pms })
+    setVerifyResult(null)
+    startVerify(async () => {
+      const res = await verifyPriceLabsPrices(r.pricelabs_listing_id!, pms)
+      setVerifyResult(res)
+    })
+  }
+
+  function handlePushCheck() {
+    if (!pushListingId) return
+    const pms = plListings.find(pl => pl.id === pushListingId)?.pms ?? "ownerrez"
+    setPushResult(null)
+    startPushCheck(async () => {
+      const res = await getPriceLabsPushStatus(pushListingId, pms)
+      setPushResult(res)
+    })
   }
 
   return (
@@ -558,13 +596,14 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
         )}
 
         <div className="space-y-2">
-          <div className="grid grid-cols-[1fr_1fr_120px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div className="grid grid-cols-[1fr_1fr_120px_32px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <span>Property</span>
             <span>PriceLabs Listing ID</span>
             <span>Price Floor ($)</span>
+            <span />
           </div>
           {rows.map(r => (
-            <div key={r.id} className="grid grid-cols-[1fr_1fr_120px] gap-3 items-center">
+            <div key={r.id} className="grid grid-cols-[1fr_1fr_120px_32px] gap-3 items-center">
               <span className="text-sm text-foreground truncate">{r.name}</span>
               <input
                 type="text"
@@ -581,9 +620,101 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
                 placeholder="None"
                 className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
               />
+              <button
+                title="Verify prices (read-only, next 30 days)"
+                disabled={!r.pricelabs_listing_id || (verifying && verifyTarget?.id === r.pricelabs_listing_id)}
+                onClick={() => handleVerifyPrices(r)}
+                className={cn(
+                  "flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+                  verifyTarget?.id === r.pricelabs_listing_id
+                    ? "bg-[#6FA1AF]/20 text-[#6FA1AF]"
+                    : "text-muted-foreground hover:text-[#6FA1AF] hover:bg-[#6FA1AF]/10"
+                )}
+              >
+                {verifying && verifyTarget?.id === r.pricelabs_listing_id
+                  ? <Loader2 className="size-3.5 animate-spin" />
+                  : <BarChart2 className="size-3.5" />
+                }
+              </button>
             </div>
           ))}
         </div>
+
+        {/* Verify prices inline panel (task 2 + task 5 base price label) */}
+        {verifyTarget && (
+          <div className="rounded-lg border border-[#6FA1AF]/30 bg-[#6FA1AF]/5 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-[#6FA1AF]">
+                Price check · {verifyTarget.name}
+                {verifyResult?.ok && (
+                  <span className={cn("ml-2", verifyResult.flagCount === 0 ? "text-emerald-400" : "text-amber-400")}>
+                    {verifyResult.flagCount === 0 ? "0 flags" : `${verifyResult.flagCount} flag${verifyResult.flagCount !== 1 ? "s" : ""}`}
+                  </span>
+                )}
+              </p>
+              <button onClick={() => { setVerifyTarget(null); setVerifyResult(null) }}
+                className="text-muted-foreground hover:text-foreground transition-colors">
+                <X className="size-3.5" />
+              </button>
+            </div>
+            {verifying && !verifyResult && <p className="text-xs text-muted-foreground">Loading…</p>}
+            {verifyResult && (
+              verifyResult.ok ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {/* Task 5: base price labeled "source unknown" because API field has no base_type */}
+                    Base:{" "}
+                    <span className="text-foreground font-medium">
+                      {verifyResult.base != null ? `$${verifyResult.base}` : "not set"}
+                    </span>{" "}
+                    <span className="text-amber-400">(source unknown — PriceLabs API does not indicate whether this is user-set or system-calculated)</span>
+                    {" · "}Currency: {verifyResult.currency ?? "unknown"}
+                    {" · "}Refreshed: {fmtDateTime(verifyResult.last_refreshed_at)}
+                    {" · "}Sync:{" "}
+                    <span className={verifyResult.push_enabled ? "text-emerald-400" : "text-red-400"}>
+                      {verifyResult.push_enabled ? "ON" : "OFF"}
+                    </span>
+                    {verifyResult.last_date_pushed && <> · Last push: {fmtDateTime(verifyResult.last_date_pushed)}</>}
+                  </p>
+                  <div className="max-h-64 overflow-y-auto rounded border border-border/40">
+                    <table className="w-full text-xs font-mono">
+                      <thead className="sticky top-0 bg-card">
+                        <tr className="text-muted-foreground text-left border-b border-border/40">
+                          <th className="py-1 px-2 font-medium">Date</th>
+                          <th className="py-1 px-2 font-medium text-right">PL Price</th>
+                          <th className="py-1 px-2 font-medium text-right">Last PMS</th>
+                          <th className="py-1 px-2 font-medium text-right">Booked</th>
+                          <th className="py-1 px-2 font-medium">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {verifyResult.days.map((d: VerifyPricesDay) => (
+                          <tr key={d.date} className={cn(
+                            "border-t border-border/30",
+                            d.flag === "null_price" || d.flag === "zero_price" ? "bg-red-500/5" :
+                            d.flag === "big_jump" ? "bg-amber-500/5" : ""
+                          )}>
+                            <td className="py-0.5 px-2 text-foreground">{d.date}</td>
+                            <td className="py-0.5 px-2 text-right">{d.price != null ? `$${d.price}` : "—"}</td>
+                            <td className="py-0.5 px-2 text-right text-muted-foreground">{d.user_price != null ? `$${d.user_price}` : "—"}</td>
+                            <td className="py-0.5 px-2 text-right text-muted-foreground">{d.booking_status ?? "—"}</td>
+                            <td className="py-0.5 px-2">
+                              {d.flag === "null_price" && <span className="text-red-400">null price</span>}
+                              {d.flag === "zero_price" && <span className="text-red-400">$0</span>}
+                              {d.flag === "big_jump"   && <span className="text-amber-400">≥50% jump</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-red-400">{verifyResult.error}</p>
+              )
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-3 pt-1 border-t border-border">
           <button
             onClick={() => startSave(async () => {
@@ -632,6 +763,81 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-xs text-muted-foreground italic">Disabled until tag handling is verified</p>
         </div>
+      </Card>
+
+      {/* Push status (task 3) */}
+      <Card title="Price Push Status">
+        <p className="text-xs text-muted-foreground">
+          Read-only. Sources: GET /v1/listings → push_enabled, last_date_pushed; POST /v1/logs → recent
+          activity. The /v1/push_price_status endpoint from the 2020 changelog has no live API reference
+          page; these two documented fields are the equivalent.
+        </p>
+        <Field label="PriceLabs Listing">
+          {plListings.length > 0 ? (
+            <select
+              value={pushListingId}
+              onChange={e => setPushListingId(e.target.value)}
+              className="w-full rounded-lg border border-input bg-white px-3 py-2 text-sm text-gray-900 outline-none focus-visible:border-ring"
+            >
+              <option value="">Select a listing…</option>
+              {plListings.map(pl => (
+                <option key={pl.id} value={pl.id}>{pl.name} ({pl.id})</option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Click "Suggest matches" above to load PriceLabs listings first.
+            </p>
+          )}
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={handlePushCheck}
+            disabled={pushChecking || !pushListingId}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {pushChecking ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+            Check push status
+          </button>
+        </div>
+        {pushResult && (
+          pushResult.ok ? (
+            <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 font-medium border",
+                  pushResult.push_enabled
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : "bg-red-500/10 text-red-400 border-red-500/20"
+                )}>
+                  Sync {pushResult.push_enabled ? "ON" : "OFF"}
+                </span>
+                <span className="text-muted-foreground">
+                  Last push: {fmtDateTime(pushResult.last_date_pushed)}
+                </span>
+                <span className="text-muted-foreground">
+                  Refreshed: {fmtDateTime(pushResult.last_refreshed_at)}
+                </span>
+              </div>
+              {pushResult.recentLogs.length > 0 ? (
+                <div className="space-y-0.5 pt-1 border-t border-border/40">
+                  <p className="text-xs font-medium text-muted-foreground">Activity (last 30 days):</p>
+                  {pushResult.recentLogs.map((l, i) => (
+                    <p key={i} className="text-xs text-muted-foreground">
+                      {l.action_label} · {fmtDateTime(l.created_at)}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground pt-1 border-t border-border/40">
+                  No activity in the last 30 days
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-red-400">{pushResult.error}</p>
+          )
+        )}
       </Card>
     </div>
   )

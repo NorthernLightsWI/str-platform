@@ -199,6 +199,68 @@ export async function fetchNeighborhoodData(
   }
 }
 
+// ── Activity logs ──────────────────────────────────────────────────────────────
+//
+// POST /v1/logs — returns audit log entries for a listing.
+// Docs: developers.pricelabs.co → Customer API → Logs
+// Request: { log_type:"listing", listings:[{listing_id, pms}], start_date?, limit? }
+// Response: { data: LogEntry[], pagination: { offset, limit, total } }
+// Each LogEntry has: action, action_label, log_type, entity, user, changes, metadata, created_at
+
+export interface PlLogEntry {
+  action      : string
+  action_label: string
+  created_at  : string
+  entity      : { listing_id: string; name: string; pms_name: string }
+  changes     : Record<string, unknown>
+}
+
+export async function getListingLogs(
+  apiKey    : string,
+  listingId : string,
+  pms       : string,
+  startDate?: string,
+): Promise<{ ok: true; logs: PlLogEntry[] } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${BASE}/logs`, {
+      method : "POST",
+      headers: {
+        "X-API-Key"   : apiKey,
+        "Content-Type": "application/json",
+        Accept        : "application/json",
+      },
+      body : JSON.stringify({
+        log_type: "listing",
+        listings: [{ listing_id: listingId, pms }],
+        ...(startDate ? { start_date: startDate } : {}),
+        limit: 20,
+      }),
+      cache: "no-store",
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: `PriceLabs logs ${res.status}: ${JSON.stringify(json)}` }
+    }
+    const data: unknown[] = Array.isArray((json as any).data) ? (json as any).data : []
+    return {
+      ok  : true,
+      logs: data.map((e: any) => ({
+        action      : String(e.action       ?? ""),
+        action_label: String(e.action_label ?? ""),
+        created_at  : String(e.created_at   ?? ""),
+        entity      : {
+          listing_id: String(e.entity?.listing_id ?? listingId),
+          name      : String(e.entity?.name       ?? ""),
+          pms_name  : String(e.entity?.pms_name   ?? pms),
+        },
+        changes: (e.changes ?? {}) as Record<string, unknown>,
+      })),
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Network error calling PriceLabs" }
+  }
+}
+
 // tags is the FULL desired tag array (PriceLabs replaces, not appends).
 // Always call parsePlTags() on the GET response before diffing/passing here.
 export async function updateListingTags(

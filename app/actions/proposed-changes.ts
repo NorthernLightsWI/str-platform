@@ -257,7 +257,25 @@ export async function applyProposal(
     return { error: "Proposal has no price fields to update — re-create the proposal" }
   }
 
+  const plStartedAt = new Date().toISOString()
   const plRes = await updatePriceLabsListings(apiKey, listings as any)
+  const plCompletedAt = new Date().toISOString()
+
+  // Audit every PriceLabs write in sync_log regardless of outcome
+  await (admin as any).from("sync_log").insert({
+    property_id  : proposal.property_id,
+    sync_type    : "pricelabs_write",
+    status       : plRes.ok ? "success" : "error",
+    error_message: plRes.ok ? null : plRes.error,
+    started_at   : plStartedAt,
+    completed_at : plCompletedAt,
+    metadata     : {
+      listing_id  : listingId,
+      request_body: { listings },
+      response    : plRes.ok ? plRes.raw : null,
+    },
+  })
+
   if (!plRes.ok) {
     await (admin as any).from("proposed_changes").update({
       status: "failed",

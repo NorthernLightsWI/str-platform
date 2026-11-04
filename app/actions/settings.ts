@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { runOwnerRezSync }   from "@/lib/sync/ownerrez"
 import { runReviewsSync }    from "@/lib/sync/reviews"
 import { runAmenitiesSync }  from "@/lib/sync/amenities"
-import { getPriceLabsListings, fetchNeighborhoodData } from "@/lib/pricelabs"
+import { getPriceLabsListings, getListingPrices, getListingLogs, fetchNeighborhoodData } from "@/lib/pricelabs"
 import {
   getMarketDefaults,
   aggregateBookings,
@@ -233,6 +233,155 @@ export async function testPriceLabsTagWrite(
   _action   : "add" | "remove",
 ): Promise<{ ok?: boolean; error?: string; message?: string }> {
   return { error: "Tag writes disabled until tag handling is verified" }
+}
+
+// ── Verify prices (read-only) ─────────────────────────────────────────────────
+//
+// Evidence for format used:
+//   POST https://api.pricelabs.co/v1/listing_prices
+//   Request:  { listings: [{ id, pms, dateFrom?, dateTo? }] }
+//   Response: Array<{
+//     id, pms, group, currency, last_refreshed_at, error?, error_status?,
+//     data: Array<{ date, price, user_price, booking_status, booking_status_STLY,
+//                   unbookable, occupancy, weekly_discount, monthly_discount, ... }>
+//   }>
+//   Source: developers.pricelabs.co/customer-api/api-reference/customer-api/prices/for-listings
+//
+//   base field on GET /v1/listings: "base price for the listing" — the API does NOT
+//   indicate whether this is user-set or system-calculated. No base_type or
+//   base_calculated field exists. Labelled "(source unknown)" in the UI.
+//   Source: developers.pricelabs.co/customer-api/api-reference/customer-api/listings/all-listings
+
+export type VerifyPricesDay = {
+  date          : string
+  price         : number | null
+  user_price    : number | null
+  booking_status: string | null
+  flag?         : "null_price" | "zero_price" | "big_jump"
+}
+
+export async function verifyPriceLabsPrices(
+  listingId: string,
+  pms      : string,
+): Promise<
+  | {
+      ok              : true
+      base            : number | null
+      push_enabled    : boolean
+      last_date_pushed: string | null
+      currency        : string | null
+      last_refreshed_at: string | null
+      days            : VerifyPricesDay[]
+      flagCount       : number
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const admin  = createAdminClient()
+    const apiKey = await getPriceLabsApiKey(admin)
+    if (!apiKey) return { ok: false, error: "PriceLabs API key not configured" }
+
+    const today    = new Date()
+    const dateFrom = today.toISOString().slice(0, 10)
+    const dateTo   = new Date(today.getTime() + 30 * 86_400_000).toISOString().slice(0, 10)
+
+    const [listingsResult, pricesResult] = await Promise.all([
+      getPriceLabsListings(apiKey),
+      getListingPrices(apiKey, [{ id: listingId, pms, dateFrom, dateTo }]),
+    ])
+
+    const listing = listingsResult.ok
+      ? listingsResult.listings.find(l => l.id === listingId)
+      : undefined
+
+    if (!pricesResult.ok) return pricesResult
+    const priceData = pricesResult.results[0]
+    if (!priceData)        return { ok: false, error: "No price data returned for this listing" }
+    if (priceData.error)   return { ok: false, error: priceData.error }
+
+    const days: VerifyPricesDay[] = priceData.data.map((d, i, arr) => {
+      const price = d.price
+      let flag: VerifyPricesDay["flag"]
+      if (price === null) {
+        flag = "null_price"
+      } else if (price === 0) {
+        flag = "zero_price"
+      } else if (i > 0) {
+        const prev = arr[i - 1].price
+        if (prev != null && prev > 0 && Math.abs((price - prev) / prev) >= 0.5) {
+          flag = "big_jump"
+        }
+      }
+      return { date: d.date, price: d.price, user_price: d.user_price, booking_status: d.booking_status, flag }
+    })
+
+    return {
+      ok              : true,
+      base            : listing?.base ?? null,
+      push_enabled    : listing?.push_enabled ?? false,
+      last_date_pushed: listing?.last_date_pushed ?? null,
+      currency        : priceData.currency,
+      last_refreshed_at: priceData.last_refreshed_at,
+      days,
+      flagCount       : days.filter(d => d.flag).length,
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to verify prices" }
+  }
+}
+
+// ── Push status (read-only) ───────────────────────────────────────────────────
+//
+// No dedicated /v1/push_price_status endpoint is reachable in the current
+// developer docs (the 2020 changelog entry has no live API reference page).
+// This action uses two documented sources instead:
+//   1. GET /v1/listings  → push_enabled (bool), last_date_pushed (string)
+//      Source: developers.pricelabs.co/customer-api/api-reference/customer-api/listings/single-listing
+//   2. POST /v1/logs     → recent activity log entries for the listing
+//      Source: developers.pricelabs.co/customer-api/api-reference/customer-api/logs
+
+export async function getPriceLabsPushStatus(
+  listingId: string,
+  pms      : string,
+): Promise<
+  | {
+      ok               : true
+      push_enabled     : boolean
+      last_date_pushed : string | null
+      last_refreshed_at: string | null
+      recentLogs       : Array<{ action_label: string; created_at: string }>
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const admin  = createAdminClient()
+    const apiKey = await getPriceLabsApiKey(admin)
+    if (!apiKey) return { ok: false, error: "PriceLabs API key not configured" }
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+    const [listingsResult, logsResult] = await Promise.all([
+      getPriceLabsListings(apiKey),
+      getListingLogs(apiKey, listingId, pms, thirtyDaysAgo),
+    ])
+
+    if (!listingsResult.ok) return listingsResult
+    const listing = listingsResult.listings.find(l => l.id === listingId)
+    if (!listing) return { ok: false, error: `Listing ${listingId} not found in PriceLabs account` }
+
+    return {
+      ok               : true,
+      push_enabled     : listing.push_enabled,
+      last_date_pushed : listing.last_date_pushed,
+      last_refreshed_at: listing.last_refreshed_at,
+      recentLogs       : logsResult.ok
+        ? logsResult.logs.slice(0, 5).map(l => ({ action_label: l.action_label, created_at: l.created_at }))
+        : [],
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to get push status" }
+  }
 }
 
 export async function getPropertyPlPrice(propertyId: string): Promise<{
