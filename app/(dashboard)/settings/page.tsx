@@ -128,7 +128,7 @@ export default async function SettingsPage() {
     const lt = resolveListingType(p.listing_type, p.external_name)
     const benchmarkLabel = hasOverride
       ? `your target ($${Math.round(oAdr!)} ADR, ${oOcc!}% occ)`
-      : `Appleton market ($${Math.round(marketAdrNum)} ADR, ${marketOccNum}% occ)`
+      : `auto — similar listings or Appleton market`
     return {
       id                          : p.id,
       name                        : p.internal_name || p.external_name,

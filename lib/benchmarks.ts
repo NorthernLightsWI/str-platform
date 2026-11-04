@@ -62,6 +62,7 @@ export async function getMarketDefaults(
 export type PropertyMeta = {
   id                           : string
   external_name                : string
+  internal_name                : string | null
   bedrooms                     : number | null
   listing_type                 : string | null
   benchmark_adr_override       : number | null
@@ -133,7 +134,7 @@ export function computeBenchmark(params: {
   }
 
   // 2. Median of comparable visible properties (same bedrooms + same listing type, ≥2, 90 days)
-  const propType     = resolveListingType(property.listing_type, property.external_name)
+  const propType     = resolveListingType(property.listing_type, property.internal_name ?? property.external_name)
   const propBedrooms = property.bedrooms
 
   const comparableIds = allProperties
@@ -142,7 +143,7 @@ export function computeBenchmark(params: {
       !hiddenIds.has(p.id) &&
       !siblingIds.has(p.id) &&
       p.bedrooms === propBedrooms &&
-      resolveListingType(p.listing_type, p.external_name) === propType,
+      resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
     )
     .map(p => p.id)
 

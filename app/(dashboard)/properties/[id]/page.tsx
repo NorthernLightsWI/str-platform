@@ -115,7 +115,7 @@ export default async function PropertyDetailPage({
 
     admin
       .from("properties")
-      .select("id, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
+      .select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("is_active", true),
 
     admin
@@ -158,6 +158,7 @@ export default async function PropertyDetailPage({
   const propertyMeta: PropertyMeta = {
     id                           : property.id,
     external_name                : property.external_name,
+    internal_name                : property.internal_name ?? null,
     bedrooms                     : property.bedrooms,
     listing_type                 : (property as any).listing_type ?? null,
     benchmark_adr_override       : (property as any).benchmark_adr_override ?? null,
@@ -177,9 +178,10 @@ export default async function PropertyDetailPage({
       groupsByParent90.set(p.parent_property_id, arr)
     }
   }
-  for (const [, children] of groupsByParent90) {
-    if (children.includes(id)) {
-      children.filter(c => c !== id).forEach(c => propGroupsSiblings.add(c))
+  for (const [parentId, children] of groupsByParent90) {
+    const allGroupMembers = [parentId, ...children]
+    if (allGroupMembers.includes(id)) {
+      allGroupMembers.filter(c => c !== id).forEach(c => propGroupsSiblings.add(c))
     }
   }
 

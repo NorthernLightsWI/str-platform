@@ -101,9 +101,10 @@ export default async function BenchmarksPage() {
       groupsByParent.set(p.parent_property_id, arr)
     }
   }
-  for (const [, children] of groupsByParent) {
-    for (const childId of children) {
-      siblingMap.set(childId, new Set(children.filter(id => id !== childId)))
+  for (const [parentId, children] of groupsByParent) {
+    const allGroupMembers = [parentId, ...children]
+    for (const memberId of allGroupMembers) {
+      siblingMap.set(memberId, new Set(allGroupMembers.filter(id => id !== memberId)))
     }
   }
 
