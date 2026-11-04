@@ -49,42 +49,42 @@ export default async function PropertyDetailPage({
     { data: comp90Data },
     { data: propGroupsData },
   ] = await Promise.all([
-    (admin as any)
-      .from("visible_properties")
-      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address, parent_property_id, listing_type, benchmark_adr_override, benchmark_occupancy_override")
+    admin
+      .from("properties")
+      .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, is_hidden, thumbnail_url, address, parent_property_id, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("id", id)
       .single(),
 
-    (supabase as any)
-      .from("visible_bookings")
+    admin
+      .from("bookings")
       .select("property_id, arrival, departure, total_amount, status")
       .eq("property_id", id)
       .neq("is_block", true)
       .neq("status", "cancelled")
       .gte("arrival", toYMD(year1Start)),
 
-    (admin as any)
-      .from("visible_reviews")
+    admin
+      .from("reviews")
       .select("overall_rating")
       .eq("property_id", id),
 
-    (admin as any)
-      .from("visible_cleaning_records")
+    admin
+      .from("cleaning_records")
       .select("property_id")
       .eq("property_id", id)
       .eq("status", "completed")
       .gte("scheduled_date", toYMD(day60Start))
       .limit(1),
 
-    (admin as any)
-      .from("visible_maintenance_issues")
+    admin
+      .from("maintenance_issues")
       .select("id, priority, status")
       .eq("property_id", id)
       .in("status", ["open", "in_progress"])
       .in("priority", ["high", "urgent"]),
 
     adminAny
-      .from("visible_recommendations")
+      .from("recommendations")
       .select("id, title, body, priority, category, impact_statement")
       .eq("property_id", id)
       .eq("is_dismissed", false)
@@ -92,8 +92,8 @@ export default async function PropertyDetailPage({
       .order("created_at", { ascending: false })
       .limit(5),
 
-    (supabase as any)
-      .from("visible_bookings")
+    admin
+      .from("bookings")
       .select("id, guest_name, arrival, departure, total_amount, listing_site, status")
       .eq("property_id", id)
       .neq("is_block", true)
@@ -101,13 +101,13 @@ export default async function PropertyDetailPage({
       .limit(10),
 
     adminAny
-      .from("visible_tasks")
+      .from("tasks")
       .select("id, title, description, priority, status, estimated_revenue_impact, due_date, recommendation_id, created_at")
       .eq("property_id", id)
       .order("created_at", { ascending: false }),
 
     adminAny
-      .from("visible_listing_changes")
+      .from("listing_changes")
       .select("id, change_type, label, before_value, after_value, applied_at, status")
       .eq("property_id", id)
       .order("applied_at", { ascending: false })
@@ -134,14 +134,26 @@ export default async function PropertyDetailPage({
 
   if (!property) notFound()
 
+  // Hidden properties are admin-only via direct URL
+  if (property.is_hidden) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) notFound()
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single()
+    if (profile?.role !== "admin") notFound()
+  }
+
   // ── Siblings (other listings in the same group) ───────────────────────────
 
   let siblings: SiblingItem[] = []
   const rootId = property.parent_property_id ?? property.id
 
   // Fetch all properties that share this root (parent or children of the same parent)
-  const { data: relatedData } = await (admin as any)
-    .from("visible_properties")
+  const { data: relatedData } = await admin
+    .from("properties")
     .select("id, external_name, internal_name")
     .or(`id.eq.${rootId},parent_property_id.eq.${rootId}`)
 
@@ -304,15 +316,23 @@ export default async function PropertyDetailPage({
   }))
 
   return (
-    <PropertyDetailClient
-      property={propertyDetail}
-      healthScore={hs}
-      revenueData={revenueData}
-      recommendations={recs}
-      recentBookings={recentBookings}
-      tasks={tasks}
-      siblings={siblings}
-      recentChanges={recentChanges}
-    />
+    <>
+      {property.is_hidden && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-2 text-sm font-medium text-amber-800">
+          <span>⚠</span>
+          <span>Hidden property — excluded from all lists, analytics, and reports. Visible to admins only via direct URL.</span>
+        </div>
+      )}
+      <PropertyDetailClient
+        property={propertyDetail}
+        healthScore={hs}
+        revenueData={revenueData}
+        recommendations={recs}
+        recentBookings={recentBookings}
+        tasks={tasks}
+        siblings={siblings}
+        recentChanges={recentChanges}
+      />
+    </>
   )
 }
