@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import "@fontsource-variable/montserrat";
-import "@fontsource-variable/roboto-mono";
+import "./fonts.css";
 import Script from "next/script";
 import "./globals.css";
 
