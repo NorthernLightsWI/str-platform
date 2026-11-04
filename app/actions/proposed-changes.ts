@@ -272,8 +272,56 @@ export async function applyProposal(
     })
     .eq("id", id)
 
-  // Auto-create listing_change record
-  await (admin as any)
+  // Only create a listing_change when the live PriceLabs write succeeded
+  if (!isDryRun) {
+    await (admin as any)
+      .from("listing_changes")
+      .insert({
+        property_id      : proposal.property_id,
+        change_type      : proposal.change_type,
+        label            : proposal.label,
+        before_value     : proposal.current_value,
+        after_value      : proposal.proposed_value,
+        reason           : proposal.reason,
+        recommendation_id: proposal.recommendation_id,
+        source           : "pricelabs_api",
+        applied_at       : new Date().toISOString().slice(0, 10),
+        applied_by       : user.id,
+        status           : "active",
+      })
+    revalidatePath("/changes")
+    revalidatePath("/properties")
+  }
+
+  revalidatePath("/proposals")
+  return { ok: true, dryRun: isDryRun }
+}
+
+export async function markProposalAppliedManually(
+  id       : string,
+  appliedAt: string,  // YYYY-MM-DD
+): Promise<{ ok?: boolean; error?: string }> {
+  const user = await getAdminUser()
+  if (!user) return { error: "Forbidden" }
+
+  const admin = createAdminClient()
+
+  const { data: proposal } = await (admin as any)
+    .from("proposed_changes")
+    .select("*")
+    .eq("id", id)
+    .eq("status", "approved")
+    .single()
+
+  if (!proposal) return { error: "Proposal not found or not in approved status" }
+
+  const hiddenIds = await getHiddenPropertyIds()
+  if (hiddenIds.has(proposal.property_id)) {
+    return { error: "Cannot log changes for hidden properties" }
+  }
+
+  // Create the listing_change row (manual)
+  const { error: lcErr } = await (admin as any)
     .from("listing_changes")
     .insert({
       property_id      : proposal.property_id,
@@ -283,14 +331,28 @@ export async function applyProposal(
       after_value      : proposal.proposed_value,
       reason           : proposal.reason,
       recommendation_id: proposal.recommendation_id,
-      source           : isDryRun ? "manual" : "pricelabs_api",
-      applied_at       : new Date().toISOString().slice(0, 10),
+      source           : "manual",
+      applied_at       : appliedAt,
       applied_by       : user.id,
       status           : "active",
     })
 
+  if (lcErr) return { error: lcErr.message }
+
+  // Mark proposal applied
+  await (admin as any)
+    .from("proposed_changes")
+    .update({
+      status    : "applied",
+      result    : { manual: true, applied_at: appliedAt },
+      decided_by: user.id,
+      decided_at: new Date().toISOString(),
+      applied_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+
   revalidatePath("/proposals")
   revalidatePath("/changes")
   revalidatePath("/properties")
-  return { ok: true, dryRun: isDryRun }
+  return { ok: true }
 }

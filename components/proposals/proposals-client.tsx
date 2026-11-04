@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { CHANGE_TYPE_LABELS } from "@/lib/change-impact"
 import type { ChangeTypeValue } from "@/lib/change-impact"
 import {
-  approveProposal, rejectProposal, applyProposal,
+  approveProposal, rejectProposal, applyProposal, markProposalAppliedManually,
 } from "@/app/actions/proposed-changes"
 import { ProposeChangeModal } from "./propose-change-modal"
 
@@ -71,9 +71,12 @@ function ProposalCard({
   writesEnabled: boolean
   onRefresh    : () => void
 }) {
-  const [expanded,  setExpanded]  = useState(false)
-  const [actionMsg, setActionMsg] = useState<string | null>(null)
-  const [pending,   startTransition] = useTransition()
+  const [expanded,      setExpanded]      = useState(false)
+  const [actionMsg,     setActionMsg]     = useState<string | null>(null)
+  const [manualOpen,    setManualOpen]    = useState(false)
+  const [manualDate,    setManualDate]    = useState(new Date().toISOString().slice(0, 10))
+  const [pending,       startTransition]  = useTransition()
+  const [manualPending, startManualTrans] = useTransition()
 
   function act(fn: () => Promise<{ ok?: boolean; dryRun?: boolean; error?: string }>, successMsg: string) {
     setActionMsg(null)
@@ -82,6 +85,17 @@ function ProposalCard({
       if (res.error) { setActionMsg(`Error: ${res.error}`); return }
       const msg = res.dryRun ? `${successMsg} (dry-run — writes are off)` : successMsg
       setActionMsg(msg)
+      onRefresh()
+    })
+  }
+
+  function handleManualApply() {
+    setActionMsg(null)
+    startManualTrans(async () => {
+      const res = await markProposalAppliedManually(proposal.id, manualDate)
+      if (res.error) { setActionMsg(`Error: ${res.error}`); return }
+      setManualOpen(false)
+      setActionMsg("Logged to Change Tracker")
       onRefresh()
     })
   }
@@ -155,21 +169,57 @@ function ProposalCard({
         )}
 
         {proposal.status === "approved" && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => act(() => applyProposal(proposal.id), "Applied to PriceLabs")}
-              className="flex items-center gap-1.5 rounded-lg bg-[#E88159]/10 border border-[#E88159]/20 px-3 py-1.5 text-xs font-medium text-[#E88159] hover:bg-[#E88159]/20 transition-colors"
-            >
-              <Zap className="size-3.5" />
-              {writesEnabled ? "Apply to PriceLabs" : "Apply (dry-run)"}
-            </button>
-            <button
-              onClick={() => act(() => rejectProposal(proposal.id), "Rejected")}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <XCircle className="size-3.5" />
-              Reject
-            </button>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {writesEnabled && (
+                <button
+                  onClick={() => act(() => applyProposal(proposal.id), "Applied to PriceLabs")}
+                  className="flex items-center gap-1.5 rounded-lg bg-[#E88159]/10 border border-[#E88159]/20 px-3 py-1.5 text-xs font-medium text-[#E88159] hover:bg-[#E88159]/20 transition-colors"
+                >
+                  <Zap className="size-3.5" />
+                  Apply to PriceLabs
+                </button>
+              )}
+              <button
+                onClick={() => { setManualOpen(o => !o); setActionMsg(null) }}
+                className="flex items-center gap-1.5 rounded-lg bg-[#6FA1AF]/10 border border-[#6FA1AF]/20 px-3 py-1.5 text-xs font-medium text-[#6FA1AF] hover:bg-[#6FA1AF]/20 transition-colors"
+              >
+                <CheckCircle2 className="size-3.5" />
+                I applied this manually
+              </button>
+              <button
+                onClick={() => act(() => rejectProposal(proposal.id), "Rejected")}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <XCircle className="size-3.5" />
+                Reject
+              </button>
+            </div>
+            {manualOpen && (
+              <div className="flex items-center gap-2 rounded-lg bg-muted/40 border border-border px-3 py-2">
+                <span className="text-xs text-muted-foreground shrink-0">Date applied:</span>
+                <input
+                  type="date"
+                  value={manualDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setManualDate(e.target.value)}
+                  className="rounded border border-input bg-background px-2 py-1 text-xs text-foreground outline-none focus-visible:border-ring"
+                />
+                <button
+                  onClick={handleManualApply}
+                  disabled={manualPending}
+                  className="flex items-center gap-1 rounded bg-[#6FA1AF] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#6FA1AF]/90 transition-colors disabled:opacity-50"
+                >
+                  {manualPending ? "Saving…" : "Log it"}
+                </button>
+                <button
+                  onClick={() => setManualOpen(false)}
+                  className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         )}
 
