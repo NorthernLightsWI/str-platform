@@ -780,6 +780,7 @@ export type Database = {
           id: string
           internal_name: string | null
           is_active: boolean
+          is_hidden: boolean
           listing_type: string | null
           max_guests: number | null
           owner_id: string
@@ -808,6 +809,7 @@ export type Database = {
           id?: string
           internal_name?: string | null
           is_active?: boolean
+          is_hidden?: boolean
           listing_type?: string | null
           max_guests?: number | null
           owner_id: string
@@ -836,6 +838,7 @@ export type Database = {
           id?: string
           internal_name?: string | null
           is_active?: boolean
+          is_hidden?: boolean
           listing_type?: string | null
           max_guests?: number | null
           owner_id?: string
@@ -1138,7 +1141,46 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      visible_properties: {
+        Row: {
+          address: string | null
+          bathrooms: number | null
+          bedrooms: number | null
+          benchmark_adr_override: number | null
+          benchmark_occupancy_override: number | null
+          city: string | null
+          country: string
+          created_at: string
+          description: string | null
+          external_name: string
+          id: string
+          internal_name: string | null
+          is_active: boolean
+          is_hidden: boolean
+          listing_type: string | null
+          max_guests: number | null
+          owner_id: string
+          ownerrez_id: string | null
+          parent_property_id: string | null
+          pricelabs_listing_id: string | null
+          pricelabs_price_floor: number | null
+          public_url: string | null
+          square_feet: number | null
+          state: string | null
+          thumbnail_url: string | null
+          updated_at: string
+          zip: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "properties_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       is_admin: { Args: never; Returns: boolean }

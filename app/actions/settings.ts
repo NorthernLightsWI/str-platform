@@ -600,10 +600,28 @@ export async function setHiddenProperties(
   try {
     await requireAdmin()
     const admin = createAdminClient()
-    const { error } = await admin
+
+    // Keep app_settings in sync for read compatibility until Part 2 is complete
+    const { error: settingsErr } = await admin
       .from("app_settings")
       .upsert({ key: "hidden_properties", value: JSON.stringify(hiddenIds) }, { onConflict: "key" })
-    if (error) return { ok: false, error: error.message }
+    if (settingsErr) return { ok: false, error: settingsErr.message }
+
+    // Write the new column: reset all to visible, then mark the hidden ones
+    const { error: resetErr } = await (admin as any)
+      .from("properties")
+      .update({ is_hidden: false })
+      .not("id", "is", null)
+    if (resetErr) return { ok: false, error: resetErr.message }
+
+    if (hiddenIds.length > 0) {
+      const { error: hideErr } = await (admin as any)
+        .from("properties")
+        .update({ is_hidden: true })
+        .in("id", hiddenIds)
+      if (hideErr) return { ok: false, error: hideErr.message }
+    }
+
     revalidatePath("/overview")
     revalidatePath("/properties")
     return { ok: true }
