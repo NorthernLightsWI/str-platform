@@ -49,42 +49,42 @@ export default async function PropertyDetailPage({
     { data: comp90Data },
     { data: propGroupsData },
   ] = await Promise.all([
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, thumbnail_url, address, parent_property_id, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("id", id)
       .single(),
 
-    supabase
-      .from("bookings")
+    (supabase as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, status")
       .eq("property_id", id)
       .neq("is_block", true)
       .neq("status", "cancelled")
       .gte("arrival", toYMD(year1Start)),
 
-    admin
-      .from("reviews")
+    (admin as any)
+      .from("visible_reviews")
       .select("overall_rating")
       .eq("property_id", id),
 
-    admin
-      .from("cleaning_records")
+    (admin as any)
+      .from("visible_cleaning_records")
       .select("property_id")
       .eq("property_id", id)
       .eq("status", "completed")
       .gte("scheduled_date", toYMD(day60Start))
       .limit(1),
 
-    admin
-      .from("maintenance_issues")
+    (admin as any)
+      .from("visible_maintenance_issues")
       .select("id, priority, status")
       .eq("property_id", id)
       .in("status", ["open", "in_progress"])
       .in("priority", ["high", "urgent"]),
 
     adminAny
-      .from("recommendations")
+      .from("visible_recommendations")
       .select("id, title, body, priority, category, impact_statement")
       .eq("property_id", id)
       .eq("is_dismissed", false)
@@ -92,8 +92,8 @@ export default async function PropertyDetailPage({
       .order("created_at", { ascending: false })
       .limit(5),
 
-    supabase
-      .from("bookings")
+    (supabase as any)
+      .from("visible_bookings")
       .select("id, guest_name, arrival, departure, total_amount, listing_site, status")
       .eq("property_id", id)
       .neq("is_block", true)
@@ -101,33 +101,33 @@ export default async function PropertyDetailPage({
       .limit(10),
 
     adminAny
-      .from("tasks")
+      .from("visible_tasks")
       .select("id, title, description, priority, status, estimated_revenue_impact, due_date, recommendation_id, created_at")
       .eq("property_id", id)
       .order("created_at", { ascending: false }),
 
     adminAny
-      .from("listing_changes")
+      .from("visible_listing_changes")
       .select("id, change_type, label, before_value, after_value, applied_at, status")
       .eq("property_id", id)
       .order("applied_at", { ascending: false })
       .limit(10),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("is_active", true),
 
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", comp90Start)
       .lt("arrival", toYMD(today)),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, parent_property_id")
       .eq("is_active", true),
   ])
@@ -140,15 +140,15 @@ export default async function PropertyDetailPage({
   const rootId = property.parent_property_id ?? property.id
 
   // Fetch all properties that share this root (parent or children of the same parent)
-  const { data: relatedData } = await admin
-    .from("properties")
+  const { data: relatedData } = await (admin as any)
+    .from("visible_properties")
     .select("id, external_name, internal_name")
     .or(`id.eq.${rootId},parent_property_id.eq.${rootId}`)
 
   if (relatedData && relatedData.length > 1) {
     siblings = relatedData
-      .filter(r => r.id !== id)
-      .map(r => ({ id: r.id, name: r.internal_name || r.external_name }))
+      .filter((r: any) => r.id !== id)
+      .map((r: any) => ({ id: r.id, name: r.internal_name || r.external_name }))
   }
 
   // ── Benchmark computation ─────────────────────────────────────────────────
@@ -185,18 +185,7 @@ export default async function PropertyDetailPage({
     }
   }
 
-  const { data: hiddenSettingData } = await admin
-    .from("app_settings")
-    .select("value")
-    .eq("key", "hidden_properties")
-    .maybeSingle()
-
-  let hiddenIdSet = new Set<string>()
-  try {
-    const raw = (hiddenSettingData as any)?.value
-    if (Array.isArray(raw)) hiddenIdSet = new Set(raw.filter((v: unknown): v is string => typeof v === "string"))
-    else if (typeof raw === "string") { const p = JSON.parse(raw); if (Array.isArray(p)) hiddenIdSet = new Set(p) }
-  } catch { /* ignore */ }
+  const hiddenIdSet = new Set<string>()
 
   const bench = computeBenchmark({
     property     : propertyMeta,
@@ -210,21 +199,21 @@ export default async function PropertyDetailPage({
 
   // ── Health score ──────────────────────────────────────────────────────────
 
-  const nights12m = (bkData ?? []).reduce((s, b) => {
+  const nights12m = (bkData ?? []).reduce((s: number, b: any) => {
     const a = new Date(b.arrival   + "T00:00:00Z")
     const d = new Date(b.departure + "T00:00:00Z")
     return s + Math.max(0, (d.getTime() - a.getTime()) / 86_400_000)
   }, 0)
-  const rev12m  = (bkData ?? []).reduce((s, b) => s + Number(b.total_amount ?? 0), 0)
+  const rev12m  = (bkData ?? []).reduce((s: number, b: any) => s + Number(b.total_amount ?? 0), 0)
   const occ12m  = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
   const adr12m  = nights12m > 0 ? rev12m / nights12m : 0
   const revpar  = rev12m / 365
 
   const allReviews  = reviewData ?? []
   const ratings     = allReviews
-    .map(r => r.overall_rating != null ? Number(r.overall_rating) : null)
-    .filter((n): n is number => n !== null && isFinite(n) && n > 0)
-  const avgRating   = ratings.length > 0 ? ratings.reduce((s, n) => s + n, 0) / ratings.length : 0
+    .map((r: any) => r.overall_rating != null ? Number(r.overall_rating) : null)
+    .filter((n: number | null): n is number => n !== null && isFinite(n) && n > 0)
+  const avgRating   = ratings.length > 0 ? ratings.reduce((s: number, n: number) => s + n, 0) / ratings.length : 0
   const reviewCount = allReviews.length   // count all reviews, not just those with a rating
 
   const input: HealthInput = {
@@ -282,7 +271,7 @@ export default async function PropertyDetailPage({
     impact_statement: r.impact_statement,
   }))
 
-  const recentBookings: BookingItem[] = (recentBkData ?? []).map(b => ({
+  const recentBookings: BookingItem[] = (recentBkData ?? []).map((b: any) => ({
     id          : b.id,
     guest_name  : b.guest_name,
     arrival     : b.arrival,

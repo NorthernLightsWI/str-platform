@@ -4,7 +4,6 @@ import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { RevenueChart, type RevenueDataPoint   } from "@/components/overview/revenue-chart"
 import { OccupancyChart, type OccupancyDataPoint } from "@/components/overview/occupancy-chart"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeHealthScore, healthColor, type HealthInput } from "@/lib/health-score"
 import { buildPropertyGroups, mergeChildBookings, childIdSet } from "@/lib/property-groups"
 import { cn } from "@/lib/utils"
@@ -216,49 +215,46 @@ export default async function OverviewPage() {
     { data: reviewData },
     { data: cleaningData },
     { data: maintData },
-    hiddenIds,
   ] = await Promise.all([
-    supabase
-      .from("properties")
+    (supabase as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, is_active, parent_property_id"),
 
-    supabase
-      .from("bookings")
+    (supabase as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, status")
       .neq("is_block", true)
       .gte("departure", toYMD(chart12Start)),   // catch bookings overlapping the window
 
-    supabase
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("id, property_id, guest_name, arrival, departure, total_amount, listing_site, status, properties(external_name)")
       .neq("is_block", true)
       .neq("status", "cancelled")
       .order("arrival", { ascending: false })
       .limit(25),
 
-    admin
-      .from("reviews")
+    (admin as any)
+      .from("visible_reviews")
       .select("property_id, overall_rating"),
 
-    admin
-      .from("cleaning_records")
+    (admin as any)
+      .from("visible_cleaning_records")
       .select("property_id")
       .eq("status", "completed")
       .gte("scheduled_date", toYMD(day60Start)),
 
-    admin
-      .from("maintenance_issues")
+    (admin as any)
+      .from("visible_maintenance_issues")
       .select("property_id")
       .in("status", ["open", "in_progress"])
       .in("priority", ["high", "urgent"]),
-
-    getHiddenPropertyIds(),
   ])
 
   const properties : PropertyRow[] = (propData ?? []) as PropertyRow[]
   const rawBookings: BookingRow[]  = (bkData   ?? []) as BookingRow[]
 
-  const allVisible = properties.filter(p => !hiddenIds.has(p.id))
+  const allVisible = properties
   const groups     = buildPropertyGroups(allVisible as (PropertyRow & { parent_property_id?: string | null })[])
   const cids       = childIdSet(groups)
   const bookings   = mergeChildBookings(rawBookings, groups)
@@ -280,7 +276,7 @@ export default async function OverviewPage() {
       reviewCount : cur.reviewCount + 1,
     })
   }
-  const recentCleanSet = new Set((cleaningData ?? []).map(c => c.property_id))
+  const recentCleanSet = new Set((cleaningData ?? []).map((c: any) => c.property_id))
   const maintCountMap  = new Map<string, number>()
   for (const m of (maintData ?? [])) {
     if (!m.property_id) continue
@@ -415,7 +411,6 @@ export default async function OverviewPage() {
     properties   : { external_name: string } | null
   }
   const recentBookings = ((recentData ?? []) as RecentRow[])
-    .filter(b => !hiddenIds.has(b.property_id))
     .slice(0, 10)
 
   // ── Render ────────────────────────────────────────────────────────────────

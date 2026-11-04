@@ -1,7 +1,6 @@
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeHealthScore, type HealthInput } from "@/lib/health-score"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 
@@ -38,48 +37,45 @@ export default async function PropertiesPage() {
     { data: reviewData },
     { data: cleaningData },
     { data: maintData },
-    hiddenIds,
   ] = await Promise.all([
-    supabase
-      .from("properties")
+    (supabase as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, city, state, bedrooms, bathrooms, max_guests, is_active, parent_property_id")
       .order("external_name"),
 
     // Trailing 12 months — used for both MTD metrics and health score
-    supabase
-      .from("bookings")
+    (supabase as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, status")
       .neq("is_block", true)
       .neq("status", "cancelled")
       .gte("arrival", toYMD(year1Start)),
 
-    admin
-      .from("reviews")
+    (admin as any)
+      .from("visible_reviews")
       .select("property_id, overall_rating"),
 
-    admin
-      .from("cleaning_records")
+    (admin as any)
+      .from("visible_cleaning_records")
       .select("property_id, status, scheduled_date")
       .gte("scheduled_date", toYMD(day60Start))
       .eq("status", "completed"),
 
-    admin
-      .from("maintenance_issues")
+    (admin as any)
+      .from("visible_maintenance_issues")
       .select("property_id, priority, status")
       .in("status", ["open", "in_progress"])
       .in("priority", ["high", "urgent"]),
-
-    getHiddenPropertyIds(),
   ])
 
-  const allProperties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
+  const allProperties: any[] = propData ?? []
   const groups        = buildPropertyGroups(allProperties)
   const cids          = childIdSet(groups)
   const parentNameMap = new Map(groups.flatMap(g =>
-    g.children.map(c => [c.id, g.parent.internal_name || g.parent.external_name])
+    g.children.map(c => [c.id, (g.parent as any).internal_name || (g.parent as any).external_name])
   ))
-  const properties    = allProperties
-  const bookings      = bkData ?? []
+  const properties: any[] = allProperties
+  const bookings:   any[] = bkData ?? []
 
   // ── Pre-aggregate health score inputs ─────────────────────────────────────
 
@@ -99,7 +95,7 @@ export default async function PropertiesPage() {
   }
 
   // Cleaning: set of property IDs that have a recent completed clean
-  const recentCleanSet = new Set((cleaningData ?? []).map(c => c.property_id))
+  const recentCleanSet = new Set((cleaningData ?? []).map((c: any) => c.property_id))
 
   // Maintenance: high/urgent open count per property
   const maintCountMap = new Map<string, number>()
@@ -175,7 +171,6 @@ export default async function PropertiesPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Properties</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
           {properties.length} {properties.length === 1 ? "property" : "properties"} visible
-          {hiddenIds.size > 0 && ` · ${hiddenIds.size} hidden`}
           {" · MTD metrics through today"}
         </p>
       </div>

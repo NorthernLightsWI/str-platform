@@ -4,7 +4,6 @@ import {
   type PropertyRow,
   type PortfolioSummary,
 } from "@/components/benchmarks/benchmarks-client"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   getMarketDefaults,
   aggregateBookings,
@@ -49,58 +48,54 @@ export default async function BenchmarksPage() {
   const comp90Start    = new Date(Date.now() - COMP_DAYS * 86_400_000).toISOString().slice(0, 10)
 
   const [
-    // All visible (non-hidden) properties — for the TABLE display (item 4 fix)
     { data: allPropData },
     // Active-only properties — for COMPARABLE pool
     { data: activePropData },
     { data: bookingData },
     { data: comp90Data },
     { data: propGroupsData },
-    hiddenIds,
     { marketAdr, marketOcc },
   ] = await Promise.all([
     (admin as any)
-      .from("properties")
+      .from("visible_properties")
       .select("id, internal_name, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id, is_active")
       .order("external_name"),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, internal_name, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("is_active", true),
 
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", periodStartStr)
       .lt("arrival", todayStr),
 
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", comp90Start)
       .lt("arrival", todayStr),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, parent_property_id")
       .eq("is_active", true),
 
-    getHiddenPropertyIds(),
     getMarketDefaults(admin),
   ])
 
   const marketRevpar = Math.round(marketAdr * marketOcc) / 100
 
-  // All non-hidden properties for the display table
-  const visibleProps = (allPropData ?? []).filter((p: any) => !hiddenIds.has(p.id))
+  const visibleProps = allPropData ?? []
 
-  // Active non-hidden properties for the comparable pool
-  const activeProps = (activePropData ?? []).filter((p: any) => !hiddenIds.has(p.id)) as PropertyMeta[]
+  // Active visible properties for the comparable pool
+  const activeProps = (activePropData ?? []) as PropertyMeta[]
 
   // Build sibling map (active properties only — same as comparable pool)
   const siblingMap = new Map<string, Set<string>>()
@@ -186,7 +181,7 @@ export default async function BenchmarksPage() {
       property     : meta,
       allProperties: activeProps,
       aggBookings  : aggBookings90,
-      hiddenIds,
+      hiddenIds    : new Set<string>(),
       siblingIds   : siblingMap.get(p.id) ?? new Set(),
       marketAdr,
       marketOcc,

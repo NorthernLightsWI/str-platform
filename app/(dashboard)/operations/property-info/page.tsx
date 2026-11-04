@@ -1,6 +1,5 @@
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   PropertyInfoClient,
   type PropertyItemFull,
@@ -22,7 +21,6 @@ export default async function PropertyInfoPage() {
     { data: vendorData },
     { data: recurringData },
     { data: changelogData },
-    hiddenIds,
   ] = await Promise.all([
     supabase
       .from("profiles")
@@ -30,44 +28,42 @@ export default async function PropertyInfoPage() {
       .eq("id", user!.id)
       .single(),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, city, state")
       .eq("is_active", true)
       .order("external_name"),
 
-    admin
-      .from("property_operational_info")
+    (admin as any)
+      .from("visible_property_operational_info")
       .select("*"),
 
     (admin as any)
-      .from("vendor_contacts")
+      .from("visible_vendor_contacts")
       .select("*")
       .order("created_at"),
 
     (admin as any)
-      .from("recurring_maintenance")
+      .from("visible_recurring_maintenance")
       .select("*")
       .order("created_at"),
 
     (admin as any)
-      .from("property_info_changelog")
+      .from("visible_property_info_changelog")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(100),
-
-    getHiddenPropertyIds(),
   ])
 
   const role    = profile?.role ?? "admin"
   const canEdit = role === "admin" || role === "cleaner"
 
-  const infoMap    = new Map((infoData ?? []).map(i => [i.property_id, i]))
+  const infoMap    = new Map((infoData ?? []).map((i: any) => [i.property_id, i]))
   const vendors    = ((vendorData  as any[] | null)   ?? []) as VendorContact[]
   const recurring  = ((recurringData as any[] | null) ?? []) as RecurringItem[]
   const changelog  = ((changelogData as any[] | null) ?? []) as ChangelogEntry[]
 
-  const properties: PropertyItemFull[] = (propData ?? []).filter(p => !hiddenIds.has(p.id)).map(p => ({
+  const properties: PropertyItemFull[] = (propData ?? []).map((p: any) => ({
     id          : p.id,
     name        : p.internal_name || p.external_name,
     externalName: p.external_name,

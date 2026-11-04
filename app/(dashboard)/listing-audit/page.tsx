@@ -1,5 +1,4 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeAudit, type AuditInput } from "@/lib/listing-audit"
 import { ListingAuditClient } from "@/components/listing-audit/listing-audit-client"
 
@@ -9,19 +8,16 @@ export default async function ListingAuditPage() {
   const [
     { data: propData,   error: propErr   },
     { data: reviewData, error: reviewErr },
-    hiddenIds,
   ] = await Promise.all([
     admin
-      .from("properties")
+      .from("visible_properties")
       .select("id, external_name, internal_name, description, thumbnail_url, photo_count, is_active")
       .eq("is_active", true)
       .order("external_name"),
 
     admin
-      .from("reviews")
+      .from("visible_reviews")
       .select("property_id, overall_rating"),
-
-    getHiddenPropertyIds(),
   ])
 
   if (propErr)   console.error("[listing-audit] properties query error:", propErr)
@@ -51,7 +47,6 @@ export default async function ListingAuditPage() {
   }
 
   const audits = ((propData ?? []) as RawProp[])
-    .filter(p => !hiddenIds.has(p.id))
     .map(p => {
       const rws = reviewMap.get(p.id)
       const input: AuditInput = {

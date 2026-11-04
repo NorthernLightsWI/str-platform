@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   ChangesClient,
   type ChangeRow,
@@ -22,12 +21,11 @@ export default async function ChangesPage() {
 
   if (profile?.role !== "admin") redirect("/overview")
 
-  const admin    = createAdminClient()
-  const hiddenIds = await getHiddenPropertyIds()
+  const admin = createAdminClient()
 
   const [{ data: changeData }, { data: propData }] = await Promise.all([
     (admin as any)
-      .from("listing_changes")
+      .from("visible_listing_changes")
       .select(`
         id, property_id, change_type, label, before_value, after_value,
         reason, recommendation_id, source, applied_at, status, reverted_at,
@@ -36,8 +34,8 @@ export default async function ChangesPage() {
       `)
       .order("applied_at", { ascending: false }),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name")
       .order("external_name"),
   ])
@@ -61,7 +59,6 @@ export default async function ChangesPage() {
   }
 
   const changes: ChangeRow[] = ((changeData ?? []) as unknown as RawChange[])
-    .filter(c => !hiddenIds.has(c.property_id))
     .map(c => ({
       id               : c.id,
       property_id      : c.property_id,
@@ -83,8 +80,7 @@ export default async function ChangesPage() {
     }))
 
   const properties = (propData ?? [])
-    .filter(p => !hiddenIds.has(p.id))
-    .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
+    .map((p: any) => ({ id: p.id, name: p.internal_name || p.external_name }))
 
   const activeCount = changes.filter(c => c.status === "active").length
 

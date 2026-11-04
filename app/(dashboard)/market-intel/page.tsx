@@ -1,5 +1,4 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { getMarketDefaults } from "@/lib/benchmarks"
 import {
   MarketIntelClient,
@@ -16,29 +15,28 @@ export default async function MarketIntelPage() {
   const periodStartStr = periodStart.toISOString().slice(0, 10)
   const todayStr       = new Date().toISOString().slice(0, 10)
 
-  const [{ data: propData }, { data: bookingData }, hiddenIds, { marketAdr, marketOcc }] = await Promise.all([
-    admin
-      .from("properties")
+  const [{ data: propData }, { data: bookingData }, { marketAdr, marketOcc }] = await Promise.all([
+    (admin as any)
+      .from("visible_properties")
       .select("id")
       .eq("is_active", true),
 
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", periodStartStr)
       .lt("arrival", todayStr),
 
-    getHiddenPropertyIds(),
     getMarketDefaults(createAdminClient()),
   ])
 
-  const propCount  = (propData ?? []).filter(p => !hiddenIds.has(p.id)).length
+  const propCount  = (propData ?? []).length
   let   totalBooked  = 0
   let   totalRevenue = 0
 
-  for (const b of (bookingData ?? []).filter(b => !hiddenIds.has(b.property_id))) {
+  for (const b of (bookingData ?? [])) {
     const arrMs  = new Date(b.arrival   + "T00:00:00").getTime()
     const depMs  = new Date(b.departure + "T00:00:00").getTime()
     const nights = Math.max(0, (depMs - arrMs) / 86_400_000)

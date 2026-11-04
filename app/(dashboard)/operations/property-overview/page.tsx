@@ -1,5 +1,4 @@
 import { createClient }      from "@/lib/supabase/server"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 import {
   PropertyOverviewClient,
@@ -37,15 +36,15 @@ export default async function PropertyOverviewPage() {
   const today    = utcToday()
   const todayStr = toYMD(today)
 
-  const [{ data: propData }, { data: bkData }, { data: cleanData }, hiddenIds] = await Promise.all([
-    supabase
-      .from("properties")
+  const [{ data: propData }, { data: bkData }, { data: cleanData }] = await Promise.all([
+    (supabase as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name, city, state, parent_property_id")
       .eq("is_active", true)
       .order("external_name"),
 
-    supabase
-      .from("bookings")
+    (supabase as any)
+      .from("visible_bookings")
       .select("id, property_id, arrival, departure, guest_name, status")
       .neq("is_block", true)
       .neq("status", "cancelled")
@@ -53,19 +52,17 @@ export default async function PropertyOverviewPage() {
       .gte("departure", toYMD(addDays(today, -3)))
       .lte("arrival",   toYMD(addDays(today, 60))),
 
-    supabase
-      .from("cleaning_records")
+    (supabase as any)
+      .from("visible_cleaning_records")
       .select("id, property_id, booking_id, scheduled_date, completed_at, status")
       .eq("status", "completed")
       .gte("scheduled_date", toYMD(addDays(today, -90)))
       .order("completed_at", { ascending: false }),
-
-    getHiddenPropertyIds(),
   ])
 
-  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
-  const bookings   = bkData    ?? []
-  const cleanings  = cleanData ?? []
+  const properties: any[] = propData ?? []
+  const bookings:   any[] = bkData    ?? []
+  const cleanings:  any[] = cleanData ?? []
 
   // Index cleanings by property_id — last write wins (most recent)
   const cleanByProp = new Map<string, (typeof cleanings)[number]>()

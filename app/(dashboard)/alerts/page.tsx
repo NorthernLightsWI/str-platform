@@ -22,12 +22,12 @@ export default async function AlertsPage() {
   if (profile?.role !== "admin") redirect("/overview")
 
   const admin = createAdminClient()
-  const { data } = await admin
-    .from("alert_settings")
+  const { data } = await (admin as any)
+    .from("visible_alert_settings")
     .select("id, alert_type, threshold, channels, is_enabled, created_at")
     .order("created_at", { ascending: false })
 
-  const alerts: AlertRow[] = (data ?? []).map(r => ({
+  const alerts: AlertRow[] = (data ?? []).map((r: any) => ({
     id        : r.id,
     type      : r.alert_type as AlertType,
     threshold : r.threshold ?? null,

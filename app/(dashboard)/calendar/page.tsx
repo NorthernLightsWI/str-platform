@@ -1,5 +1,4 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   CalendarClient,
   type CalBooking,
@@ -35,32 +34,29 @@ export default async function CalendarPage({
 
   const admin = createAdminClient()
 
-  const [{ data: bkData }, { data: propData }, hiddenIds] = await Promise.all([
-    admin
-      .from("bookings")
+  const [{ data: bkData }, { data: propData }] = await Promise.all([
+    (admin as any)
+      .from("visible_bookings")
       .select("id, property_id, guest_name, arrival, departure, total_amount, listing_site")
       .neq("is_block", true)
       .neq("status", "cancelled")
       .lte("arrival",   weStr)
       .gte("departure", wsStr),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, internal_name, external_name")
       .order("external_name"),
-
-    getHiddenPropertyIds(),
   ])
 
   const properties: CalProperty[] = (propData ?? [])
-    .filter(p => !hiddenIds.has(p.id))
-    .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
+    .map((p: any) => ({ id: p.id, name: p.internal_name || p.external_name }))
 
   const propIdSet = new Set(properties.map(p => p.id))
 
   const bookings: CalBooking[] = (bkData ?? [])
-    .filter(b => !hiddenIds.has(b.property_id) && propIdSet.has(b.property_id))
-    .map(b => ({
+    .filter((b: any) => propIdSet.has(b.property_id))
+    .map((b: any) => ({
       id           : b.id,
       property_id  : b.property_id,
       guest_name   : b.guest_name   ?? null,

@@ -4,7 +4,6 @@ import {
   type BookingRaw,
   type PropertyRaw,
 } from "@/components/analytics/analytics-client"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { buildPropertyGroups, mergeChildBookings, childIdSet } from "@/lib/property-groups"
 
 export default async function AnalyticsPage() {
@@ -17,27 +16,25 @@ export default async function AnalyticsPage() {
   cutoff.setMonth(cutoff.getMonth() - 13)
   const cutoffStr = cutoff.toISOString().slice(0, 10)
 
-  const [{ data: bookingData }, { data: propData }, hiddenIds] = await Promise.all([
-    admin
-      .from("bookings")
+  const [{ data: bookingData }, { data: propData }] = await Promise.all([
+    (admin as any)
+      .from("visible_bookings")
       .select("arrival, departure, total_amount, net_revenue, listing_site, property_id")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("departure", cutoffStr)
       .order("arrival"),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, internal_name, external_name, parent_property_id, is_active"),
-
-    getHiddenPropertyIds(),
   ])
 
   const bookedPropIds = new Set((bookingData ?? []).map((b: { property_id: string }) => b.property_id))
 
   // Include active props + inactive props that had at least one booking in the period
   const allProps = (propData ?? []).filter(
-    (p: { id: string; is_active: boolean }) => !hiddenIds.has(p.id) && (p.is_active || bookedPropIds.has(p.id))
+    (p: { id: string; is_active: boolean }) => p.is_active || bookedPropIds.has(p.id)
   )
   const groups   = buildPropertyGroups(allProps)
   const cids     = childIdSet(groups)
@@ -48,8 +45,7 @@ export default async function AnalyticsPage() {
   ).length
 
   const rawBookings: BookingRaw[] = (bookingData ?? [])
-    .filter(b => !hiddenIds.has(b.property_id))
-    .map(b => ({
+    .map((b: any) => ({
       arrival      : b.arrival,
       departure    : b.departure,
       total_amount : b.total_amount,
@@ -63,8 +59,8 @@ export default async function AnalyticsPage() {
 
   // Remove child properties from the property list (absorbed into parent)
   const properties: PropertyRaw[] = allProps
-    .filter(p => !cids.has(p.id))
-    .map(p => ({
+    .filter((p: any) => !cids.has(p.id))
+    .map((p: any) => ({
       id  : p.id,
       name: p.internal_name || p.external_name,
     }))

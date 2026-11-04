@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   DashboardClient,
   type CleaningTask,
@@ -41,17 +40,17 @@ export default async function CleanerDashboardPage() {
   const wkStart    = weekStart(today)
   const moStart    = monthStart(today)
 
-  const [{ data: propData }, { data: bkData }, { data: cleanData }, { data: inProgressData }, hiddenIds] =
+  const [{ data: propData }, { data: bkData }, { data: cleanData }, { data: inProgressData }] =
     await Promise.all([
-      supabase
-        .from("properties")
+      (supabase as any)
+        .from("visible_properties")
         .select("id, external_name, internal_name, city, state")
         .eq("is_active", true)
         .order("external_name"),
 
       // Covers: checkouts since start of month + next 60 days of arrivals
-      supabase
-        .from("bookings")
+      (supabase as any)
+        .from("visible_bookings")
         .select("id, property_id, arrival, departure, guest_name, status")
         .neq("is_block", true)
         .neq("status", "cancelled")
@@ -59,27 +58,25 @@ export default async function CleanerDashboardPage() {
         .lte("arrival",   toYMD(addDays(today, 60))),
 
       // Completed cleanings since start of month (to check "already cleaned")
-      supabase
-        .from("cleaning_records")
+      (supabase as any)
+        .from("visible_cleaning_records")
         .select("id, property_id, scheduled_date, completed_at, status")
         .eq("status", "completed")
         .gte("scheduled_date", toYMD(moStart))
         .order("completed_at", { ascending: false }),
 
       // In-progress records (carry notes forward into the card)
-      supabase
-        .from("cleaning_records")
+      (supabase as any)
+        .from("visible_cleaning_records")
         .select("id, property_id, notes")
         .eq("status", "in_progress")
         .gte("scheduled_date", toYMD(addDays(today, -7))),
-
-      getHiddenPropertyIds(),
     ])
 
-  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id))
-  const bookings   = bkData        ?? []
-  const cleanings  = cleanData     ?? []
-  const inProgress = inProgressData ?? []
+  const properties: any[] = propData ?? []
+  const bookings:   any[] = bkData        ?? []
+  const cleanings:  any[] = cleanData     ?? []
+  const inProgress: any[] = inProgressData ?? []
 
   // Index cleanings (most-recent first — query was ordered desc)
   const cleanedProp = new Map<string, (typeof cleanings)[number]>()

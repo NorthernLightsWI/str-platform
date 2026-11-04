@@ -4,8 +4,8 @@ import { HistoryTable, type HistoryRow } from "@/components/operations/cleaning-
 export default async function CleaningHistoryPage() {
   const supabase = await createClient()
 
-  const { data } = await supabase
-    .from("cleaning_records")
+  const { data } = await (supabase as any)
+    .from("visible_cleaning_records")
     .select(`
       id,
       scheduled_date,

@@ -1,14 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { MaintenanceClient } from "@/components/operations/maintenance/maintenance-client"
 import type { IssueData } from "@/components/operations/maintenance/issue-card"
 
 export default async function MaintenancePage() {
   const admin = createAdminClient()
 
-  const [{ data: issueData }, { data: propData }, hiddenIds] = await Promise.all([
-    admin
-      .from("maintenance_issues")
+  const [{ data: issueData }, { data: propData }] = await Promise.all([
+    (admin as any)
+      .from("visible_maintenance_issues")
       .select(`
         id, property_id, title, description, category, priority, status,
         notes, images, reporter_name, created_at, resolved_at,
@@ -16,13 +15,11 @@ export default async function MaintenancePage() {
       `)
       .order("created_at", { ascending: false }),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name")
       .eq("is_active", true)
       .order("external_name"),
-
-    getHiddenPropertyIds(),
   ])
 
   type RawIssue = {
@@ -42,7 +39,6 @@ export default async function MaintenancePage() {
   }
 
   const issues: IssueData[] = ((issueData ?? []) as unknown as RawIssue[])
-    .filter(r => !r.property_id || !hiddenIds.has(r.property_id))
     .map(r => ({
     id            : r.id,
     title         : r.title,
@@ -60,7 +56,7 @@ export default async function MaintenancePage() {
     reporter_name : r.reporter_name ?? null,
   }))
 
-  const properties = (propData ?? []).filter(p => !hiddenIds.has(p.id)).map(p => ({
+  const properties = (propData ?? []).map((p: any) => ({
     id  : p.id,
     name: p.internal_name || p.external_name,
   }))
