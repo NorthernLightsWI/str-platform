@@ -22,6 +22,8 @@ import {
   saveBenchmarkPropertySettings,
   fetchPriceLabsListings,
   testPriceLabsTagWrite,
+  getPropertyBenchmarkTiers,
+  type TierResult,
 } from "@/app/actions/settings"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,6 +46,7 @@ export type BenchmarkPropertyRow = {
   listing_type                : string | null
   benchmark_adr_override      : number | null
   benchmark_occupancy_override: number | null
+  pricelabs_listing_id        : string | null
   benchmarkLabel              : string
 }
 
@@ -1315,11 +1318,28 @@ function BenchmarksTab({
     listing_type                : p.listing_type,
     benchmark_adr_override      : p.benchmark_adr_override,
     benchmark_occupancy_override: p.benchmark_occupancy_override,
+    pricelabs_listing_id        : p.pricelabs_listing_id,
     benchmarkLabel              : p.benchmarkLabel,
   })))
 
   const [propSaving, startPropSave] = useTransition()
   const [propResult, setPropResult] = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  // Compare sources modal
+  const [compareId,      setCompareId]      = useState<string | null>(null)
+  const [compareTiers,   setCompareTiers]   = useState<TierResult[] | null>(null)
+  const [compareLoading, startCompare]      = useTransition()
+  const [compareError,   setCompareError]   = useState<string | null>(null)
+
+  function openCompare(id: string) {
+    setCompareId(id)
+    setCompareTiers(null)
+    setCompareError(null)
+    startCompare(async () => {
+      const r = await getPropertyBenchmarkTiers(id)
+      if (r.error) { setCompareError(r.error) } else { setCompareTiers(r.tiers ?? null) }
+    })
+  }
 
   function setRow(id: string, field: "listing_type" | "benchmark_adr_override" | "benchmark_occupancy_override", value: string) {
     setRows(prev => prev.map(r =>
@@ -1332,8 +1352,83 @@ function BenchmarksTab({
     ))
   }
 
+  const compareName = compareId ? rows.find(r => r.id === compareId)?.name ?? "" : ""
+
   return (
     <div className="space-y-4">
+      {/* Compare sources modal */}
+      {compareId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-2xl rounded-2xl border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <div>
+                <p className="font-semibold text-foreground">Compare benchmark sources</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{compareName}</p>
+              </div>
+              <button
+                onClick={() => setCompareId(null)}
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              {compareLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Computing all tiers…
+                </div>
+              ) : compareError ? (
+                <p className="text-sm text-red-400">{compareError}</p>
+              ) : compareTiers ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b border-border">
+                      <th className="text-left py-2 pr-3 font-medium">Tier</th>
+                      <th className="text-right py-2 px-3 font-medium">ADR</th>
+                      <th className="text-right py-2 px-3 font-medium">Occ</th>
+                      <th className="text-right py-2 px-3 font-medium">RevPAR</th>
+                      <th className="text-right py-2 pl-3 font-medium">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {compareTiers.map(t => (
+                      <tr key={t.tier} className={cn(t.active ? "bg-[#E88159]/8" : "")}>
+                        <td className="py-2.5 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-muted-foreground text-xs">{t.tier}</span>
+                            <span className={cn("font-medium", t.active ? "text-[#E88159]" : "text-foreground")}>
+                              {t.label}
+                            </span>
+                            {t.active && (
+                              <span className="rounded-full bg-[#E88159]/15 text-[#E88159] border border-[#E88159]/30 text-[10px] px-1.5 py-0.5 font-medium">
+                                active
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right tabular-nums text-foreground">
+                          {t.adr != null ? `$${Math.round(t.adr)}` : "—"}
+                        </td>
+                        <td className="py-2.5 px-3 text-right tabular-nums text-foreground">
+                          {t.occ != null ? `${t.occ}%` : "—"}
+                        </td>
+                        <td className="py-2.5 px-3 text-right tabular-nums text-foreground">
+                          {t.revpar != null ? `$${Math.round(t.revpar)}` : "—"}
+                        </td>
+                        <td className="py-2.5 pl-3 text-right text-xs text-muted-foreground">
+                          {t.note}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
       <Card title="Market Defaults">
         <p className="text-xs text-muted-foreground">
           These values are the market-level fallback when a property has no comparable listings or
@@ -1387,49 +1482,70 @@ function BenchmarksTab({
         </p>
 
         <div className="space-y-2">
-          <div className="grid grid-cols-[1fr_60px_120px_110px_110px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div className="grid grid-cols-[1fr_52px_120px_100px_100px_80px_auto] gap-2 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <span>Property</span>
             <span>Beds</span>
             <span>Listing Type</span>
-            <span>Target ADR ($)</span>
-            <span>Target Occ (%)</span>
+            <span>ADR ($)</span>
+            <span>Occ (%)</span>
+            <span>Source</span>
+            <span />
           </div>
-          {rows.map(r => (
-            <div key={r.id} className="grid grid-cols-[1fr_60px_120px_110px_110px] gap-3 items-center">
-              <div className="min-w-0">
-                <span className="text-sm text-foreground truncate block">{r.name}</span>
-                <span className="text-[10px] text-muted-foreground/60">{r.benchmarkLabel}</span>
+          {rows.map(r => {
+            const hasOverride = r.benchmark_adr_override != null && r.benchmark_occupancy_override != null &&
+              r.benchmark_adr_override > 0 && r.benchmark_occupancy_override > 0
+            const sourceBadge = hasOverride
+              ? <span className="rounded-full bg-[#E88159]/15 text-[#E88159] border border-[#E88159]/30 text-[10px] px-1.5 py-0.5 font-medium">override</span>
+              : r.pricelabs_listing_id
+                ? <span className="rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[10px] px-1.5 py-0.5 font-medium">PL mapped</span>
+                : <span className="rounded-full bg-muted/40 text-muted-foreground border border-border text-[10px] px-1.5 py-0.5 font-medium">auto</span>
+            return (
+              <div key={r.id} className="grid grid-cols-[1fr_52px_120px_100px_100px_80px_auto] gap-2 items-center">
+                <div className="min-w-0">
+                  <span className="text-sm text-foreground truncate block">{r.name}</span>
+                  <span className="text-[10px] text-muted-foreground/60">{r.benchmarkLabel}</span>
+                </div>
+                <span className="text-sm text-muted-foreground tabular-nums">{r.bedrooms ?? "—"}</span>
+                <select
+                  value={r.listing_type ?? ""}
+                  onChange={e => setRow(r.id, "listing_type", e.target.value)}
+                  className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 outline-none focus-visible:border-ring"
+                >
+                  <option value="">Auto-detect</option>
+                  <option value="nightly">Nightly</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  value={r.benchmark_adr_override ?? ""}
+                  onChange={e => setRow(r.id, "benchmark_adr_override", e.target.value)}
+                  placeholder="None"
+                  className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={r.benchmark_occupancy_override ?? ""}
+                  onChange={e => setRow(r.id, "benchmark_occupancy_override", e.target.value)}
+                  placeholder="None"
+                  className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                />
+                <div className="flex justify-center">{sourceBadge}</div>
+                <button
+                  onClick={() => openCompare(r.id)}
+                  disabled={compareLoading && compareId === r.id}
+                  className="text-xs text-[#6FA1AF] hover:text-[#6FA1AF]/80 font-medium transition-colors whitespace-nowrap disabled:opacity-50"
+                >
+                  {compareLoading && compareId === r.id ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : "Compare →"}
+                </button>
               </div>
-              <span className="text-sm text-muted-foreground tabular-nums">{r.bedrooms ?? "—"}</span>
-              <select
-                value={r.listing_type ?? ""}
-                onChange={e => setRow(r.id, "listing_type", e.target.value)}
-                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 outline-none focus-visible:border-ring"
-              >
-                <option value="">Auto-detect</option>
-                <option value="nightly">Nightly</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-              <input
-                type="number"
-                min={0}
-                value={r.benchmark_adr_override ?? ""}
-                onChange={e => setRow(r.id, "benchmark_adr_override", e.target.value)}
-                placeholder="None"
-                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
-              />
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={r.benchmark_occupancy_override ?? ""}
-                onChange={e => setRow(r.id, "benchmark_occupancy_override", e.target.value)}
-                placeholder="None"
-                className="w-full rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
-              />
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex items-center gap-3 pt-1 border-t border-border">

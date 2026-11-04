@@ -35,7 +35,7 @@ export default async function SettingsPage() {
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
     admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
-    admin.from("properties").select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override").eq("is_active", true).order("external_name"),
+    (admin as any).from("properties").select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -116,6 +116,7 @@ export default async function SettingsPage() {
     listing_type                 : string | null
     benchmark_adr_override       : number | null
     benchmark_occupancy_override : number | null
+    pricelabs_listing_id         : string | null
   }
 
   const marketAdrNum = parseFloat(rawSettings.market_adr ?? "207") || 207
@@ -125,7 +126,6 @@ export default async function SettingsPage() {
     const oAdr = p.benchmark_adr_override != null ? Number(p.benchmark_adr_override) : null
     const oOcc = p.benchmark_occupancy_override != null ? Number(p.benchmark_occupancy_override) : null
     const hasOverride = oAdr != null && oOcc != null && oAdr > 0 && oOcc > 0
-    const lt = resolveListingType(p.listing_type, p.external_name)
     const benchmarkLabel = hasOverride
       ? `your target ($${Math.round(oAdr!)} ADR, ${oOcc!}% occ)`
       : `auto — similar listings or Appleton market`
@@ -136,6 +136,7 @@ export default async function SettingsPage() {
       listing_type                : p.listing_type ?? null,
       benchmark_adr_override      : oAdr,
       benchmark_occupancy_override: oOcc,
+      pricelabs_listing_id        : p.pricelabs_listing_id ?? null,
       benchmarkLabel,
     }
   })

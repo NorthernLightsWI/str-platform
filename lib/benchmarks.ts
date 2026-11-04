@@ -6,18 +6,26 @@ import { createAdminClient } from "@/lib/supabase/admin"
 
 export type ListingType = "nightly" | "weekly" | "monthly"
 
-export type BenchmarkSource = "override" | "comparable" | "market"
+export type BenchmarkSource =
+  | "override"
+  | "pl_neighborhood"
+  | "comparable"
+  | "comparable_scaled"
+  | "market"
 
 export type BenchmarkResult = {
-  adr        : number
-  occupancy  : number   // 0–100
-  revpar     : number
-  source     : BenchmarkSource
-  sourceLabel: string   // e.g. "your target ($180 ADR, 60% occ)", "similar listings (median $155)", "Appleton market ($207 ADR, 57% occ)"
+  adr            : number
+  occupancy      : number   // 0–100
+  revpar         : number
+  source         : BenchmarkSource
+  sourceLabel    : string
+  comparableCount: number   // 0 for override / market / pl_neighborhood
 }
 
 export const DEFAULT_MARKET_ADR = 207
 export const DEFAULT_MARKET_OCC = 57
+
+// ── Listing type ──────────────────────────────────────────────────────────────
 
 export function inferListingType(name: string): ListingType {
   const n = name.toLowerCase()
@@ -27,14 +35,16 @@ export function inferListingType(name: string): ListingType {
 }
 
 export function resolveListingType(
-  listingType: string | null | undefined,
-  externalName: string,
+  listingType : string | null | undefined,
+  displayName : string,                    // prefer internal_name ?? external_name
 ): ListingType {
   if (listingType === "nightly" || listingType === "weekly" || listingType === "monthly") {
     return listingType
   }
-  return inferListingType(externalName)
+  return inferListingType(displayName)
 }
+
+// ── Market defaults ───────────────────────────────────────────────────────────
 
 export async function getMarketDefaults(
   admin: ReturnType<typeof createAdminClient>,
@@ -59,6 +69,8 @@ export async function getMarketDefaults(
   return { marketAdr, marketOcc }
 }
 
+// ── Core types ────────────────────────────────────────────────────────────────
+
 export type PropertyMeta = {
   id                           : string
   external_name                : string
@@ -74,6 +86,127 @@ export type AggBooking = {
   bookedNights : number
   revenue      : number
 }
+
+// ── PriceLabs neighborhood cache ──────────────────────────────────────────────
+
+export type PlNeighborhoodData = {
+  adr         : number
+  occ         : number   // 0–100
+  listingCount: number
+  fetchedAt   : string   // ISO timestamp
+}
+
+const PL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
+
+function plCacheKey(listingId: string) {
+  return `pl_nb_cache_${listingId}`
+}
+
+export async function getPlNeighborhoodCache(
+  admin    : ReturnType<typeof createAdminClient>,
+  listingId: string,
+): Promise<PlNeighborhoodData | null> {
+  const { data } = await admin
+    .from("app_settings")
+    .select("value")
+    .eq("key", plCacheKey(listingId))
+    .maybeSingle()
+  if (!data) return null
+  try {
+    const str    = typeof data.value === "string" ? data.value : JSON.stringify(data.value)
+    const parsed = JSON.parse(str) as PlNeighborhoodData
+    if (!parsed?.fetchedAt || !parsed?.adr || !parsed?.occ) return null
+    if (Date.now() - new Date(parsed.fetchedAt).getTime() > PL_CACHE_TTL_MS) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export async function setPlNeighborhoodCache(
+  admin    : ReturnType<typeof createAdminClient>,
+  listingId: string,
+  data     : Omit<PlNeighborhoodData, "fetchedAt">,
+): Promise<void> {
+  const payload: PlNeighborhoodData = { ...data, fetchedAt: new Date().toISOString() }
+  await admin
+    .from("app_settings")
+    .upsert(
+      { key: plCacheKey(listingId), value: JSON.stringify(payload) },
+      { onConflict: "key" },
+    )
+}
+
+// ── PriceLabs neighborhood data extraction ────────────────────────────────────
+//
+// /v1/neighborhood_data response shape (abbreviated):
+//   data["Market KPI"].Category["0"]   = same-bedroom bucket (relative to listing)
+//   data["Market KPI"].Category["All"] = all-bedroom bucket
+//   Y_values[0] = Total Available Days (per month)
+//   Y_values[3] = Revenue (per month)
+//   Y_values[4] = Total Booked Days (per month)
+//   X_values    = ["Nov 2024", "Dec 2024", ...]
+//
+// We use last 6 past-month entries where AvailDays ≤ 1500 (annual roll-ups have higher values).
+
+export function extractPlBenchmark(
+  payload : unknown,
+  _bedrooms: number | null,
+): PlNeighborhoodData | null {
+  try {
+    const d = (payload as any)?.data
+    if (!d?.["Market KPI"]) return null
+
+    const kpiSection = d["Market KPI"]
+    // Category "0" = same bedrooms relative to listing
+    const sameBedCat   = kpiSection.Category?.["0"]
+    const sameBedCount = sameBedCat?.["Listings Used"] ?? 0
+    // Prefer same-bedroom category if ≥10 listings, else use All
+    const kpiCat = sameBedCount >= 10
+      ? sameBedCat
+      : (kpiSection.Category?.["All"] ?? sameBedCat)
+    if (!kpiCat) return null
+
+    const xVals       : string[] = kpiCat.X_values ?? []
+    const availSeries              = kpiCat.Y_values?.[0]  // Total Available Days
+    const revSeries                = kpiCat.Y_values?.[3]  // Revenue
+    const bookedSeries             = kpiCat.Y_values?.[4]  // Total Booked Days
+    if (!xVals.length || !availSeries || !revSeries || !bookedSeries) return null
+
+    const today = new Date()
+    let totalRevenue = 0, totalBooked = 0, totalAvailable = 0, monthsUsed = 0
+
+    for (let i = xVals.length - 1; i >= 0 && monthsUsed < 6; i--) {
+      const monthDate = new Date(xVals[i] + " 1")
+      if (isNaN(monthDate.getTime()) || monthDate >= today) continue
+      const avail  = Number(availSeries[i]  ?? 0)
+      const rev    = Number(revSeries[i]    ?? 0)
+      const booked = Number(bookedSeries[i] ?? 0)
+      // Skip zeros and annual roll-up entries (> 1500 days in a "month")
+      if (avail <= 0 || avail > 1500 || booked <= 0) continue
+      totalRevenue   += rev
+      totalBooked    += booked
+      totalAvailable += avail
+      monthsUsed++
+    }
+
+    if (monthsUsed < 2 || totalBooked <= 0 || totalAvailable <= 0) return null
+    const adr = totalRevenue   / totalBooked
+    const occ = (totalBooked  / totalAvailable) * 100
+    if (!isFinite(adr) || !isFinite(occ) || adr <= 0 || occ <= 0) return null
+
+    return {
+      adr         : Math.round(adr * 100) / 100,
+      occ         : Math.round(occ * 10)  / 10,
+      listingCount: kpiCat["Listings Used"] ?? 0,
+      fetchedAt   : new Date().toISOString(),
+    }
+  } catch {
+    return null
+  }
+}
+
+// ── Bookings aggregation ──────────────────────────────────────────────────────
 
 const COMP_WINDOW_DAYS = 90
 
@@ -93,7 +226,7 @@ export function aggregateBookings(
       (new Date(b.departure + "T00:00:00").getTime() -
        new Date(b.arrival   + "T00:00:00").getTime()) / 86_400_000,
     )
-    const rev = Number((b as any).net_revenue ?? (b as any).total_amount ?? 0)
+    const rev      = Number((b as any).net_revenue ?? (b as any).total_amount ?? 0)
     const existing = map.get(b.property_id)
     if (existing) {
       existing.bookedNights += nights
@@ -109,6 +242,8 @@ export function aggregateBookings(
   return Array.from(map.values())
 }
 
+// ── Core benchmark computation ────────────────────────────────────────────────
+
 export function computeBenchmark(params: {
   property     : PropertyMeta
   allProperties: PropertyMeta[]
@@ -117,64 +252,131 @@ export function computeBenchmark(params: {
   siblingIds   : Set<string>
   marketAdr    : number
   marketOcc    : number
+  plData      ?: PlNeighborhoodData | null
 }): BenchmarkResult {
-  const { property, allProperties, aggBookings, hiddenIds, siblingIds, marketAdr, marketOcc } = params
+  const { property, allProperties, aggBookings, hiddenIds, siblingIds, marketAdr, marketOcc, plData } = params
 
-  // 1. Per-property override
+  // ── (a) Per-property override ──────────────────────────────────────────────
   const oAdr = property.benchmark_adr_override
   const oOcc = property.benchmark_occupancy_override
   if (oAdr != null && oOcc != null && oAdr > 0 && oOcc > 0) {
     return {
-      adr        : oAdr,
-      occupancy  : oOcc,
-      revpar     : Math.round(oAdr * oOcc) / 100,
-      source     : "override",
-      sourceLabel: `your target ($${Math.round(oAdr)} ADR, ${oOcc}% occ)`,
+      adr            : oAdr,
+      occupancy      : oOcc,
+      revpar         : Math.round(oAdr * oOcc) / 100,
+      source         : "override",
+      sourceLabel    : `your target ($${Math.round(oAdr)} ADR, ${oOcc}% occ)`,
+      comparableCount: 0,
     }
   }
 
-  // 2. Median of comparable visible properties (same bedrooms + same listing type, ≥2, 90 days)
   const propType     = resolveListingType(property.listing_type, property.internal_name ?? property.external_name)
   const propBedrooms = property.bedrooms
+  const bookingMap   = new Map(aggBookings.map(b => [b.property_id, b]))
 
-  const comparableIds = allProperties
-    .filter(p =>
-      p.id !== property.id &&
-      !hiddenIds.has(p.id) &&
-      !siblingIds.has(p.id) &&
-      p.bedrooms === propBedrooms &&
-      resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
-    )
-    .map(p => p.id)
+  // ── (b) PriceLabs neighborhood data (cached, per listing) ─────────────────
+  if (plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5) {
+    return {
+      adr            : plData.adr,
+      occupancy      : plData.occ,
+      revpar         : Math.round(plData.adr * plData.occ) / 100,
+      source         : "pl_neighborhood",
+      sourceLabel    : `PriceLabs market (${plData.listingCount} nearby listings)`,
+      comparableCount: plData.listingCount,
+    }
+  }
 
-  if (comparableIds.length >= 2) {
-    const bookingMap = new Map(aggBookings.map(b => [b.property_id, b]))
-    const compMetrics = comparableIds
-      .map(id => bookingMap.get(id))
-      .filter((b): b is AggBooking => b != null && b.bookedNights > 0)
+  // ── (c) Same bedrooms + same listing type, ≥2 comps ───────────────────────
+  const sameBedComps = allProperties.filter(p =>
+    p.id !== property.id &&
+    !hiddenIds.has(p.id) &&
+    !siblingIds.has(p.id) &&
+    p.bedrooms === propBedrooms &&
+    resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
+  )
 
-    if (compMetrics.length >= 2) {
-      const adrs = compMetrics.map(b => b.revenue / b.bookedNights).sort((a, b) => a - b)
-      const occs = compMetrics.map(b => (b.bookedNights / COMP_WINDOW_DAYS) * 100).sort((a, b) => a - b)
-      const mid  = Math.floor(adrs.length / 2)
-      const medAdr = adrs.length % 2 === 1 ? adrs[mid] : (adrs[mid - 1] + adrs[mid]) / 2
-      const medOcc = occs.length % 2 === 1 ? occs[mid] : (occs[mid - 1] + occs[mid]) / 2
+  if (sameBedComps.length >= 2) {
+    type Booked = AggBooking
+    const metrics: Booked[] = sameBedComps
+      .map(p => bookingMap.get(p.id))
+      .filter((b): b is Booked => b != null && b.bookedNights > 0)
+
+    if (metrics.length >= 2) {
+      const { medAdr, medOcc } = medianAdrOcc(metrics)
       return {
-        adr        : Math.round(medAdr * 100) / 100,
-        occupancy  : Math.round(medOcc * 10) / 10,
-        revpar     : Math.round(medAdr * medOcc) / 100,
-        source     : "comparable",
-        sourceLabel: `similar listings (median $${Math.round(medAdr)})`,
+        adr            : Math.round(medAdr * 100) / 100,
+        occupancy      : Math.round(medOcc * 10)  / 10,
+        revpar         : Math.round(medAdr * medOcc) / 100,
+        source         : "comparable",
+        sourceLabel    : `similar listings (median $${Math.round(medAdr)})`,
+        comparableCount: metrics.length,
       }
     }
   }
 
-  // 3. Market fallback
-  return {
-    adr        : marketAdr,
-    occupancy  : marketOcc,
-    revpar     : Math.round(marketAdr * marketOcc) / 100,
-    source     : "market",
-    sourceLabel: `Appleton market ($${Math.round(marketAdr)} ADR, ${marketOcc}% occ)`,
+  // ── (d) Same listing type, any bedrooms, ≥3 comps (ADR scaled by bedroom ratio) ──
+  const anyBedComps = allProperties.filter(p =>
+    p.id !== property.id &&
+    !hiddenIds.has(p.id) &&
+    !siblingIds.has(p.id) &&
+    resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
+  )
+
+  if (anyBedComps.length >= 3) {
+    type CompBed = { bookedNights: number; revenue: number; beds: number | null }
+    const metrics: CompBed[] = anyBedComps
+      .map(p => {
+        const b = bookingMap.get(p.id)
+        if (!b || b.bookedNights <= 0) return null
+        return { bookedNights: b.bookedNights, revenue: b.revenue, beds: p.bedrooms }
+      })
+      .filter((x): x is CompBed => x !== null)
+
+    if (metrics.length >= 3) {
+      const propBeds = (propBedrooms ?? 1) > 0 ? (propBedrooms ?? 1) : 1
+      const scaledAdrs = metrics.map(b => {
+        const compBeds = (b.beds ?? 1) > 0 ? (b.beds ?? 1) : 1
+        return (b.revenue / b.bookedNights) * (propBeds / compBeds)
+      }).sort((a, b) => a - b)
+      const rawOccs = metrics
+        .map(b => (b.bookedNights / COMP_WINDOW_DAYS) * 100)
+        .sort((a, b) => a - b)
+
+      const medAdr = medianOf(scaledAdrs)
+      const medOcc = medianOf(rawOccs)
+      return {
+        adr            : Math.round(medAdr * 100) / 100,
+        occupancy      : Math.round(medOcc * 10)  / 10,
+        revpar         : Math.round(medAdr * medOcc) / 100,
+        source         : "comparable_scaled",
+        sourceLabel    : `similar ${propType}s, any beds (${metrics.length} comps, bed-scaled)`,
+        comparableCount: metrics.length,
+      }
+    }
   }
+
+  // ── (e) Market constants fallback ─────────────────────────────────────────
+  return {
+    adr            : marketAdr,
+    occupancy      : marketOcc,
+    revpar         : Math.round(marketAdr * marketOcc) / 100,
+    source         : "market",
+    sourceLabel    : `Appleton market ($${Math.round(marketAdr)} ADR, ${marketOcc}% occ)`,
+    comparableCount: 0,
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function medianOf(sorted: number[]): number {
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function medianAdrOcc(metrics: AggBooking[]): { medAdr: number; medOcc: number } {
+  const adrs = metrics.map(b => b.revenue / b.bookedNights).sort((a, b) => a - b)
+  const occs = metrics.map(b => (b.bookedNights / COMP_WINDOW_DAYS) * 100).sort((a, b) => a - b)
+  return { medAdr: medianOf(adrs), medOcc: medianOf(occs) }
 }

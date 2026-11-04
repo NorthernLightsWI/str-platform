@@ -7,16 +7,18 @@ import { cn } from "@/lib/utils"
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PropertyRow = {
-  id             : string
-  name           : string
-  occupancy      : number   // 0–100
-  adr            : number   // dollars
-  revpar         : number   // dollars
-  score          : number   // 0–100
-  benchmarkOcc   : number
-  benchmarkAdr   : number
-  benchmarkRevpar: number
-  benchmarkSource: string
+  id              : string
+  name            : string
+  occupancy       : number   // 0–100
+  adr             : number   // dollars
+  revpar          : number   // dollars
+  score           : number   // 0–100
+  benchmarkOcc    : number
+  benchmarkAdr    : number
+  benchmarkRevpar : number
+  benchmarkSource : string
+  comparableCount : number
+  isActive        : boolean
 }
 
 export type PortfolioSummary = {
@@ -50,20 +52,29 @@ function rowHighlight(score: number): string {
 
 // ── Benchmark source badge ────────────────────────────────────────────────────
 
-function SourceBadge({ source }: { source: string }) {
-  const isOverride   = source.startsWith("your target")
-  const isComparable = source.startsWith("similar")
+function SourceBadge({ source, comps }: { source: string; comps: number }) {
+  const isOverride  = source.startsWith("your target")
+  const isPl        = source.startsWith("PriceLabs")
+  const isComp      = source.startsWith("similar listings")
+  const isScaled    = source.includes("any beds")
   const cls = isOverride
     ? "bg-[#E88159]/15 text-[#E88159] border-[#E88159]/30"
-    : isComparable
+    : (isComp || isScaled)
       ? "bg-[#6FA1AF]/15 text-[#6FA1AF] border-[#6FA1AF]/30"
-      : "bg-muted/40 text-muted-foreground border-border"
+      : isPl
+        ? "bg-violet-500/15 text-violet-400 border-violet-500/30"
+        : "bg-muted/40 text-muted-foreground border-border"
+  const label = isOverride ? "override"
+    : isPl     ? `PL (${comps})`
+    : isComp   ? `${comps} comps`
+    : isScaled ? `${comps} scaled`
+    : "market"
   return (
     <span className={cn(
       "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium max-w-[120px] truncate",
       cls,
     )} title={source}>
-      {isOverride ? "override" : isComparable ? "comparable" : "market"}
+      {label}
     </span>
   )
 }
@@ -234,12 +245,16 @@ export function BenchmarksClient({
       {/* Benchmark source legend */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span>Benchmark:</span>
-        <SourceBadge source="your target (override example)" />
-        <span className="text-[10px] text-muted-foreground">Override</span>
-        <SourceBadge source="similar listings (comparable)" />
-        <span className="text-[10px] text-muted-foreground">Comparable</span>
-        <SourceBadge source="market" />
-        <span className="text-[10px] text-muted-foreground">Market</span>
+        <SourceBadge source="your target" comps={0} />
+        <span className="text-[10px] text-muted-foreground">Override (a)</span>
+        <SourceBadge source="PriceLabs market" comps={42} />
+        <span className="text-[10px] text-muted-foreground">PriceLabs (b)</span>
+        <SourceBadge source="similar listings" comps={3} />
+        <span className="text-[10px] text-muted-foreground">Same beds+type (c)</span>
+        <SourceBadge source="similar nightly any beds" comps={5} />
+        <span className="text-[10px] text-muted-foreground">Any beds scaled (d)</span>
+        <SourceBadge source="market" comps={0} />
+        <span className="text-[10px] text-muted-foreground">Market (e)</span>
       </div>
 
       {/* Table */}
@@ -296,10 +311,13 @@ export function BenchmarksClient({
 
           <tbody className="divide-y divide-border">
             {sorted.map(row => (
-              <tr key={row.id} className={cn("transition-colors", rowHighlight(row.score))}>
+              <tr key={row.id} className={cn("transition-colors", row.isActive ? rowHighlight(row.score) : "opacity-50 hover:opacity-70")}>
                 {/* Property name */}
                 <td className="px-3 py-3 font-medium text-foreground max-w-[180px]">
                   <span className="block truncate" title={row.name}>{row.name}</span>
+                  {!row.isActive && (
+                    <span className="text-[10px] text-muted-foreground/60 font-normal">inactive</span>
+                  )}
                 </td>
 
                 {/* Occupancy */}
@@ -325,7 +343,7 @@ export function BenchmarksClient({
 
                 {/* Benchmark source */}
                 <td className="px-3 py-3 text-center">
-                  <SourceBadge source={row.benchmarkSource} />
+                  <SourceBadge source={row.benchmarkSource} comps={row.comparableCount} />
                 </td>
 
                 {/* Score */}

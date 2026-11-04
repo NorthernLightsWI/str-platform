@@ -6,7 +6,17 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { runOwnerRezSync }   from "@/lib/sync/ownerrez"
 import { runReviewsSync }    from "@/lib/sync/reviews"
 import { runAmenitiesSync }  from "@/lib/sync/amenities"
-import { getPriceLabsListings, updateListingTags } from "@/lib/pricelabs"
+import { getPriceLabsListings, updateListingTags, fetchNeighborhoodData } from "@/lib/pricelabs"
+import {
+  getMarketDefaults,
+  aggregateBookings,
+  resolveListingType,
+  computeBenchmark,
+  extractPlBenchmark,
+  getPlNeighborhoodCache,
+  type PropertyMeta,
+} from "@/lib/benchmarks"
+import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -478,5 +488,258 @@ export async function setHiddenProperties(
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to save" }
+  }
+}
+
+// ── Compare benchmark sources ─────────────────────────────────────────────────
+
+export type TierResult = {
+  tier   : string         // "(a)" … "(e)"
+  label  : string
+  adr    : number | null
+  occ    : number | null
+  revpar : number | null
+  comps  : number
+  active : boolean
+  note   : string
+}
+
+export async function getPropertyBenchmarkTiers(
+  propertyId: string,
+): Promise<{ ok?: boolean; tiers?: TierResult[]; error?: string }> {
+  try {
+    await requireAdmin()
+    const admin = createAdminClient()
+
+    const [
+      { data: prop },
+      { data: allPropsRaw },
+      { data: comp90Raw },
+      { data: propGroupsRaw },
+      hiddenIds,
+      { marketAdr, marketOcc },
+    ] = await Promise.all([
+      (admin as any)
+        .from("properties")
+        .select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id")
+        .eq("id", propertyId)
+        .single(),
+
+      (admin as any)
+        .from("properties")
+        .select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
+        .eq("is_active", true),
+
+      admin
+        .from("bookings")
+        .select("property_id, arrival, departure, net_revenue, total_amount")
+        .neq("status", "cancelled")
+        .eq("is_block", false)
+        .gte("arrival", new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10))
+        .lt("arrival", new Date().toISOString().slice(0, 10)),
+
+      admin
+        .from("properties")
+        .select("id, parent_property_id")
+        .eq("is_active", true),
+
+      getHiddenPropertyIds(),
+      getMarketDefaults(admin),
+    ])
+
+    if (!prop) return { error: "Property not found" }
+
+    const allProps     = (allPropsRaw ?? []) as PropertyMeta[]
+    const aggBookings  = aggregateBookings(comp90Raw ?? [])
+    const bookingMap   = new Map(aggBookings.map(b => [b.property_id, b]))
+
+    // Build sibling set for this property
+    const groupsByParent = new Map<string, string[]>()
+    for (const p of propGroupsRaw ?? []) {
+      if ((p as any).parent_property_id) {
+        const arr = groupsByParent.get((p as any).parent_property_id) ?? []
+        arr.push(p.id)
+        groupsByParent.set((p as any).parent_property_id, arr)
+      }
+    }
+    const siblingIds = new Set<string>()
+    for (const [parentId, children] of groupsByParent) {
+      const all = [parentId, ...children]
+      if (all.includes(propertyId)) all.filter(id => id !== propertyId).forEach(id => siblingIds.add(id))
+    }
+
+    const propMeta: PropertyMeta = {
+      id                           : prop.id,
+      external_name                : prop.external_name,
+      internal_name                : prop.internal_name ?? null,
+      bedrooms                     : prop.bedrooms,
+      listing_type                 : prop.listing_type ?? null,
+      benchmark_adr_override       : prop.benchmark_adr_override ?? null,
+      benchmark_occupancy_override : prop.benchmark_occupancy_override ?? null,
+    }
+
+    const propType     = resolveListingType(propMeta.listing_type, propMeta.internal_name ?? propMeta.external_name)
+    const propBedrooms = propMeta.bedrooms
+
+    const tiers: TierResult[] = []
+
+    // ── (a) Override ─────────────────────────────────────────────────────────
+    const oAdr = propMeta.benchmark_adr_override
+    const oOcc = propMeta.benchmark_occupancy_override
+    const hasOverride = oAdr != null && oOcc != null && oAdr > 0 && oOcc > 0
+    tiers.push({
+      tier  : "(a)",
+      label : "Per-property override",
+      adr   : hasOverride ? oAdr! : null,
+      occ   : hasOverride ? oOcc! : null,
+      revpar: hasOverride ? Math.round(oAdr! * oOcc!) / 100 : null,
+      comps : 0,
+      active: false,
+      note  : hasOverride ? `$${Math.round(oAdr!)} ADR, ${oOcc!}% occ` : "Not configured",
+    })
+
+    // ── (b) PriceLabs neighborhood ────────────────────────────────────────────
+    const plListingId: string | null = prop.pricelabs_listing_id ?? null
+    let plData = plListingId ? await getPlNeighborhoodCache(admin, plListingId) : null
+
+    // Attempt live fetch if no valid cache
+    if (!plData && plListingId) {
+      const { data: apiKeyRow } = await admin
+        .from("app_settings").select("value").eq("key", "pricelabs_api_key").single()
+      const apiKey = typeof apiKeyRow?.value === "string" ? apiKeyRow.value : null
+      if (apiKey) {
+        const r = await fetchNeighborhoodData(apiKey, plListingId, "ownerrez")
+        if (r.ok) plData = extractPlBenchmark(r.payload, propMeta.bedrooms)
+      }
+    }
+
+    const plUsable = plData && plData.adr > 0 && plData.occ > 0 && plData.listingCount >= 5
+    tiers.push({
+      tier  : "(b)",
+      label : "PriceLabs neighborhood",
+      adr   : plUsable ? plData!.adr : null,
+      occ   : plUsable ? plData!.occ : null,
+      revpar: plUsable ? Math.round(plData!.adr * plData!.occ) / 100 : null,
+      comps : plData?.listingCount ?? 0,
+      active: false,
+      note  : !plListingId
+        ? "No PriceLabs listing mapping"
+        : !plData
+          ? "Sync not enabled in PriceLabs"
+          : !plUsable
+            ? `Only ${plData.listingCount} nearby listings (need ≥5)`
+            : `${plData.listingCount} nearby listings`,
+    })
+
+    // ── (c) Same beds + same type, ≥2 ────────────────────────────────────────
+    const sameBedMetrics = allProps
+      .filter(p =>
+        p.id !== propertyId &&
+        !hiddenIds.has(p.id) &&
+        !siblingIds.has(p.id) &&
+        p.bedrooms === propBedrooms &&
+        resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
+      )
+      .map(p => bookingMap.get(p.id))
+      .filter((b): b is typeof aggBookings[0] => b != null && b.bookedNights > 0)
+
+    let cAdr: number | null = null, cOcc: number | null = null
+    if (sameBedMetrics.length >= 2) {
+      const adrs = sameBedMetrics.map(b => b.revenue / b.bookedNights).sort((a, b) => a - b)
+      const occs = sameBedMetrics.map(b => (b.bookedNights / 90) * 100).sort((a, b) => a - b)
+      const mid  = Math.floor(adrs.length / 2)
+      cAdr = adrs.length % 2 === 1 ? adrs[mid] : (adrs[mid-1] + adrs[mid]) / 2
+      cOcc = occs.length % 2 === 1 ? occs[mid] : (occs[mid-1] + occs[mid]) / 2
+    }
+    tiers.push({
+      tier  : "(c)",
+      label : "Same beds + same type",
+      adr   : cAdr != null ? Math.round(cAdr * 100) / 100 : null,
+      occ   : cOcc != null ? Math.round(cOcc * 10)  / 10  : null,
+      revpar: cAdr != null && cOcc != null ? Math.round(cAdr * cOcc) / 100 : null,
+      comps : sameBedMetrics.length,
+      active: false,
+      note  : sameBedMetrics.length >= 2
+        ? `${sameBedMetrics.length} comps (${propBedrooms ?? "?"}br, ${propType})`
+        : `${sameBedMetrics.length} comp${sameBedMetrics.length !== 1 ? "s" : ""} — need ≥2`,
+    })
+
+    // ── (d) Same type, any beds, ≥3 (ADR bed-scaled) ─────────────────────────
+    type CB = { bookedNights: number; revenue: number; beds: number | null }
+    const scaledMetrics: CB[] = allProps
+      .filter(p =>
+        p.id !== propertyId &&
+        !hiddenIds.has(p.id) &&
+        !siblingIds.has(p.id) &&
+        resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
+      )
+      .map(p => {
+        const b = bookingMap.get(p.id)
+        if (!b || b.bookedNights <= 0) return null
+        return { bookedNights: b.bookedNights, revenue: b.revenue, beds: p.bedrooms }
+      })
+      .filter((x): x is CB => x !== null)
+
+    let dAdr: number | null = null, dOcc: number | null = null
+    if (scaledMetrics.length >= 3) {
+      const propBeds = (propBedrooms ?? 1) > 0 ? (propBedrooms ?? 1) : 1
+      const sadrs = scaledMetrics.map(b => {
+        const cb = (b.beds ?? 1) > 0 ? (b.beds ?? 1) : 1
+        return (b.revenue / b.bookedNights) * (propBeds / cb)
+      }).sort((a, b) => a - b)
+      const soccs = scaledMetrics.map(b => (b.bookedNights / 90) * 100).sort((a, b) => a - b)
+      const mid = Math.floor(sadrs.length / 2)
+      dAdr = sadrs.length % 2 === 1 ? sadrs[mid] : (sadrs[mid-1] + sadrs[mid]) / 2
+      dOcc = soccs.length % 2 === 1 ? soccs[mid] : (soccs[mid-1] + soccs[mid]) / 2
+    }
+    tiers.push({
+      tier  : "(d)",
+      label : "Same type, any beds (bed-scaled)",
+      adr   : dAdr != null ? Math.round(dAdr * 100) / 100 : null,
+      occ   : dOcc != null ? Math.round(dOcc * 10)  / 10  : null,
+      revpar: dAdr != null && dOcc != null ? Math.round(dAdr * dOcc) / 100 : null,
+      comps : scaledMetrics.length,
+      active: false,
+      note  : scaledMetrics.length >= 3
+        ? `${scaledMetrics.length} comps (${propType}, ADR scaled to ${propBedrooms ?? "?"}br)`
+        : `${scaledMetrics.length} comp${scaledMetrics.length !== 1 ? "s" : ""} — need ≥3`,
+    })
+
+    // ── (e) Market constants ──────────────────────────────────────────────────
+    tiers.push({
+      tier  : "(e)",
+      label : "Appleton market constants",
+      adr   : marketAdr,
+      occ   : marketOcc,
+      revpar: Math.round(marketAdr * marketOcc) / 100,
+      comps : 0,
+      active: false,
+      note  : "Configured in Settings → Benchmarks",
+    })
+
+    // Mark active tier
+    const activeTier = computeBenchmark({
+      property     : propMeta,
+      allProperties: allProps,
+      aggBookings,
+      hiddenIds,
+      siblingIds,
+      marketAdr,
+      marketOcc,
+      plData       : plUsable ? plData! : null,
+    })
+    const sourceToTier: Record<string, string> = {
+      override          : "(a)",
+      pl_neighborhood   : "(b)",
+      comparable        : "(c)",
+      comparable_scaled : "(d)",
+      market            : "(e)",
+    }
+    const activeTierKey = sourceToTier[activeTier.source]
+    for (const t of tiers) t.active = t.tier === activeTierKey
+
+    return { ok: true, tiers }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed" }
   }
 }

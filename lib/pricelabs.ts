@@ -82,6 +82,34 @@ export async function updatePriceLabsListings(
   }
 }
 
+// ── Neighborhood data ──────────────────────────────────────────────────────────
+
+export async function fetchNeighborhoodData(
+  apiKey   : string,
+  listingId: string,
+  pms      : string,
+): Promise<{ ok: true; payload: unknown } | { ok: false; error: string }> {
+  try {
+    const qs  = new URLSearchParams({ listing_id: listingId, pms })
+    const res = await fetch(`${BASE}/neighborhood_data?${qs}`, {
+      headers: { "X-API-Key": apiKey, Accept: "application/json" },
+      cache  : "no-store",
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const msg = (json as any)?.error
+      return { ok: false, error: typeof msg === "string" ? msg : `PriceLabs ${res.status}` }
+    }
+    if ((json as any)?.status !== "Success") {
+      const msg = (json as any)?.error ?? (json as any)?.status
+      return { ok: false, error: typeof msg === "string" ? msg : "PriceLabs neighborhood fetch failed" }
+    }
+    return { ok: true, payload: json }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Network error calling PriceLabs" }
+  }
+}
+
 // tags is the FULL desired tag array (PriceLabs replaces, not appends)
 export async function updateListingTags(
   apiKey   : string,
