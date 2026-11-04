@@ -8,7 +8,7 @@ import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 export default async function RecommendationsPage() {
   const admin = createAdminClient()
 
-  const [{ data }, hiddenIds] = await Promise.all([
+  const [{ data }, { data: propData }, hiddenIds] = await Promise.all([
     admin
       .from("recommendations")
       .select(`
@@ -18,6 +18,12 @@ export default async function RecommendationsPage() {
         properties(internal_name, external_name)
       `)
       .order("created_at", { ascending: false }),
+
+    admin
+      .from("properties")
+      .select("id, external_name, internal_name")
+      .eq("is_active", true)
+      .order("external_name"),
 
     getHiddenPropertyIds(),
   ])
@@ -60,6 +66,10 @@ export default async function RecommendationsPage() {
 
   const activeCount = recs.filter(r => !r.is_dismissed && !r.is_completed).length
 
+  const properties = (propData ?? [])
+    .filter(p => !hiddenIds.has(p.id))
+    .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
+
   return (
     <div className="p-6 space-y-5 max-w-[1400px]">
       <div>
@@ -70,7 +80,7 @@ export default async function RecommendationsPage() {
         </p>
       </div>
 
-      <RecommendationsClient recs={recs} />
+      <RecommendationsClient recs={recs} properties={properties} />
     </div>
   )
 }

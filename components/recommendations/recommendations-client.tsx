@@ -2,9 +2,11 @@
 
 import { useState, useTransition, useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { Sparkles, ChevronRight, CheckCircle, XCircle } from "lucide-react"
+import { Sparkles, ChevronRight, CheckCircle, XCircle, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { dismissRecommendation, completeRecommendation } from "@/app/actions/recommendations"
+import { guessChangeTypeFromCategory } from "@/lib/change-impact"
+import { LogChangeModal } from "@/components/changes/log-change-modal"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -101,7 +103,13 @@ function lastRefreshedLabel(recs: RecommendationData[]): string | null {
 
 // ── Recommendation card ────────────────────────────────────────────────────
 
-function RecCard({ rec, onAction }: { rec: RecommendationData; onAction: () => void }) {
+function RecCard({
+  rec, onAction, onApply,
+}: {
+  rec: RecommendationData
+  onAction: () => void
+  onApply: (rec: RecommendationData) => void
+}) {
   const [pending, startTransition] = useTransition()
 
   function dismiss() {
@@ -194,16 +202,26 @@ function RecCard({ rec, onAction }: { rec: RecommendationData; onAction: () => v
 
       {/* Footer actions */}
       {!rec.is_dismissed && (
-        <div className="flex items-center gap-2 pt-1 border-t border-border">
+        <div className="flex items-center gap-2 pt-1 border-t border-border flex-wrap">
           {!rec.is_completed && (
-            <button
-              onClick={complete}
-              disabled={pending}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-            >
-              <CheckCircle className="size-3.5" />
-              Mark complete
-            </button>
+            <>
+              <button
+                onClick={() => onApply(rec)}
+                disabled={pending}
+                className="flex items-center gap-1.5 rounded-lg bg-[#E88159]/10 border border-[#E88159]/20 px-3 py-1.5 text-xs font-medium text-[#E88159] hover:bg-[#E88159]/20 transition-colors"
+              >
+                <Zap className="size-3.5" />
+                I applied this
+              </button>
+              <button
+                onClick={complete}
+                disabled={pending}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+              >
+                <CheckCircle className="size-3.5" />
+                Mark complete
+              </button>
+            </>
           )}
           <button
             onClick={dismiss}
@@ -226,7 +244,13 @@ type StatusTab = "active" | "completed" | "dismissed" | "all"
 const PRIORITIES = ["critical", "high", "medium", "low"]
 const CATEGORIES = ["pricing", "occupancy", "listing_quality", "reviews", "ranking"]
 
-export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) {
+export function RecommendationsClient({
+  recs,
+  properties = [],
+}: {
+  recs       : RecommendationData[]
+  properties?: { id: string; name: string }[]
+}) {
   const router                        = useRouter()
   const [status, setStatus]           = useState<StatusTab>("active")
   const [priority, setPriority]       = useState("all")
@@ -235,10 +259,10 @@ export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) 
   const [generating, setGenerating]   = useState(false)
   const [genError, setGenError]       = useState<string | null>(null)
   const [genSuccess, setGenSuccess]   = useState<string | null>(null)
+  const [applyRec,  setApplyRec]      = useState<RecommendationData | null>(null)
 
-  const properties = useMemo(() => {
-    const names = [...new Set(recs.map(r => r.property_name))].sort()
-    return names
+  const propertyNames = useMemo(() => {
+    return [...new Set(recs.map(r => r.property_name))].sort()
   }, [recs])
 
   const filtered = useMemo(() => {
@@ -376,7 +400,7 @@ export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) 
           className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground outline-none focus-visible:border-ring"
         >
           <option value="all">All properties</option>
-          {properties.map(p => <option key={p} value={p}>{p}</option>)}
+          {propertyNames.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
 
         <span className="text-sm text-muted-foreground ml-auto">
@@ -404,9 +428,31 @@ export function RecommendationsClient({ recs }: { recs: RecommendationData[] }) 
               key={r.id}
               rec={r}
               onAction={() => router.refresh()}
+              onApply={setApplyRec}
             />
           ))}
         </div>
+      )}
+
+      {applyRec && (
+        <LogChangeModal
+          properties={
+            properties.length > 0
+              ? properties
+              : [{ id: applyRec.property_id ?? "", name: applyRec.property_name }]
+          }
+          prefillPropertyId={applyRec.property_id ?? undefined}
+          prefillType={guessChangeTypeFromCategory(applyRec.category)}
+          prefillLabel={applyRec.title}
+          prefillReason={applyRec.body ?? undefined}
+          prefillRecId={applyRec.id}
+          onMarkRecCompleted={async () => {
+            await completeRecommendation(applyRec.id)
+            router.refresh()
+          }}
+          onClose={() => setApplyRec(null)}
+          onCreated={() => { setApplyRec(null); router.refresh() }}
+        />
       )}
     </div>
   )

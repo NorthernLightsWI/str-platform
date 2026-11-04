@@ -52,7 +52,8 @@
       "PowerShell(npm *)",
       "Read(//c/Users/tjhal/Desktop/custom-companycam/**)",
       "Bash(npm outdated *)",
-      "Bash(dir \"C:\\\\Users\\\\tjhal\\\\Desktop\\\\str-platform\" /b)"
+      "Bash(dir \"C:\\\\Users\\\\tjhal\\\\Desktop\\\\str-platform\" /b)",
+      "Bash(npx next *)"
     ]
   }
 }

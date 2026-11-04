@@ -10,6 +10,7 @@ import {
   type BookingItem,
   type TaskItem,
   type SiblingItem,
+  type RecentChangeItem,
 } from "@/components/properties/property-detail-client"
 
 function addDays(d: Date, n: number) {
@@ -40,6 +41,7 @@ export default async function PropertyDetailPage({
     { data: recData },
     { data: recentBkData },
     { data: taskData },
+    { data: changeData },
   ] = await Promise.all([
     admin
       .from("properties")
@@ -97,6 +99,13 @@ export default async function PropertyDetailPage({
       .select("id, title, description, priority, status, estimated_revenue_impact, due_date, recommendation_id, created_at")
       .eq("property_id", id)
       .order("created_at", { ascending: false }),
+
+    adminAny
+      .from("listing_changes")
+      .select("id, change_type, label, before_value, after_value, applied_at, status")
+      .eq("property_id", id)
+      .order("applied_at", { ascending: false })
+      .limit(10),
   ])
 
   if (!property) notFound()
@@ -211,6 +220,16 @@ export default async function PropertyDetailPage({
     created_at              : t.created_at,
   }))
 
+  const recentChanges: RecentChangeItem[] = ((changeData ?? []) as any[]).map((c: any) => ({
+    id          : c.id,
+    change_type : c.change_type,
+    label       : c.label,
+    before_value: c.before_value,
+    after_value : c.after_value,
+    applied_at  : c.applied_at,
+    status      : c.status,
+  }))
+
   return (
     <PropertyDetailClient
       property={propertyDetail}
@@ -220,6 +239,7 @@ export default async function PropertyDetailPage({
       recentBookings={recentBookings}
       tasks={tasks}
       siblings={siblings}
+      recentChanges={recentChanges}
     />
   )
 }

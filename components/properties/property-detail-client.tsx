@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils"
 import { healthColor, type HealthScore } from "@/lib/health-score"
 import { createTask, updateTaskStatus, deleteTask } from "@/app/actions/tasks"
+import { CHANGE_TYPE_LABELS } from "@/lib/change-impact"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,16 @@ export type TaskItem = {
 export type SiblingItem = {
   id  : string
   name: string
+}
+
+export type RecentChangeItem = {
+  id          : string
+  change_type : string
+  label       : string
+  before_value: string | null
+  after_value : string | null
+  applied_at  : string
+  status      : string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -516,6 +527,62 @@ function BookingsSection({ bookings }: { bookings: BookingItem[] }) {
   )
 }
 
+// ── Recent Changes Section ─────────────────────────────────────────────────────
+
+function RecentChangesSection({
+  changes, propertyId,
+}: {
+  changes    : RecentChangeItem[]
+  propertyId : string
+}) {
+  if (changes.length === 0) return null
+
+  function fmtDate(ymd: string) {
+    return new Date(ymd + "T00:00:00Z").toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+    })
+  }
+
+  return (
+    <Card>
+      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <SectionTitle>Recent Changes</SectionTitle>
+        <Link
+          href="/changes"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          View all →
+        </Link>
+      </div>
+      <ul className="divide-y divide-border">
+        {changes.map(c => (
+          <li key={c.id} className="px-5 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+                  {CHANGE_TYPE_LABELS[c.change_type as keyof typeof CHANGE_TYPE_LABELS] ?? c.change_type}
+                </span>
+                {c.status === "reverted" && (
+                  <span className="text-xs rounded-md bg-muted/50 px-1.5 py-0.5 text-muted-foreground/60 line-through">reverted</span>
+                )}
+              </div>
+              <p className={cn("text-sm mt-0.5", c.status === "reverted" ? "text-muted-foreground/50 line-through" : "text-foreground")}>
+                {c.label}
+              </p>
+              {(c.before_value || c.after_value) && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {c.before_value ?? "—"} → {c.after_value ?? "—"}
+                </p>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground shrink-0 mt-0.5">{fmtDate(c.applied_at)}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
 // ── Tasks Section ──────────────────────────────────────────────────────────────
 
 function TasksSection({
@@ -662,7 +729,8 @@ export function PropertyDetailClient({
   recommendations,
   recentBookings,
   tasks: initialTasks,
-  siblings = [],
+  siblings      = [],
+  recentChanges = [],
 }: {
   property       : PropertyDetail
   healthScore    : HealthScore
@@ -670,7 +738,8 @@ export function PropertyDetailClient({
   recommendations: RecItem[]
   recentBookings : BookingItem[]
   tasks          : TaskItem[]
-  siblings       ?: SiblingItem[]
+  siblings      ?: SiblingItem[]
+  recentChanges ?: RecentChangeItem[]
 }) {
   const router = useRouter()
   const [modal,         setModal]         = useState<ModalState>(CLOSED_MODAL)
@@ -764,6 +833,7 @@ export function PropertyDetailClient({
       <RevenueSection rev={revenueData} />
       <RecsSection recs={recommendations} onCreateTask={openModalForRec} />
       <BookingsSection bookings={recentBookings} />
+      <RecentChangesSection changes={recentChanges} propertyId={property.id} />
       <TasksSection
         tasks={tasks}
         propertyId={property.id}

@@ -362,6 +362,75 @@ export type Database = {
           },
         ]
       }
+      listing_changes: {
+        Row: {
+          after_value      : string | null
+          applied_at       : string
+          applied_by       : string | null
+          before_value     : string | null
+          change_type      : string
+          created_at       : string
+          id               : string
+          label            : string
+          notes            : string | null
+          property_id      : string
+          reason           : string | null
+          recommendation_id: string | null
+          reverted_at      : string | null
+          source           : string
+          status           : string
+        }
+        Insert: {
+          after_value      ?: string | null
+          applied_at        : string
+          applied_by       ?: string | null
+          before_value     ?: string | null
+          change_type       : string
+          created_at       ?: string
+          id               ?: string
+          label             : string
+          notes            ?: string | null
+          property_id       : string
+          reason           ?: string | null
+          recommendation_id?: string | null
+          reverted_at      ?: string | null
+          source           ?: string
+          status           ?: string
+        }
+        Update: {
+          after_value      ?: string | null
+          applied_at       ?: string
+          applied_by       ?: string | null
+          before_value     ?: string | null
+          change_type      ?: string
+          created_at       ?: string
+          id               ?: string
+          label            ?: string
+          notes            ?: string | null
+          property_id      ?: string
+          reason           ?: string | null
+          recommendation_id?: string | null
+          reverted_at      ?: string | null
+          source           ?: string
+          status           ?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listing_changes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "listing_changes_recommendation_id_fkey"
+            columns: ["recommendation_id"]
+            isOneToOne: false
+            referencedRelation: "recommendations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maintenance_issues: {
         Row: {
           actual_cost: number | null

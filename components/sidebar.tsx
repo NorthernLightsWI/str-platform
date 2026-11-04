@@ -27,6 +27,7 @@ import {
   Eye,
   EyeOff,
   Calendar,
+  Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { logout } from "@/app/actions/auth"
@@ -42,6 +43,7 @@ const ADMIN_ITEMS: NavItem[] = [
   { label: "Properties",        href: "/properties",        icon: Building2       },
   { label: "Analytics",         href: "/analytics",         icon: BarChart3       },
   { label: "Benchmarks",        href: "/benchmarks",        icon: TrendingUp      },
+  { label: "Change Tracker",    href: "/changes",           icon: Activity        },
   { label: "Recommendations",   href: "/recommendations",   icon: Lightbulb       },
   { label: "Tasks",             href: "/tasks",             icon: CheckSquare     },
   { label: "Listing Audit",     href: "/listing-audit",     icon: ClipboardCheck  },
