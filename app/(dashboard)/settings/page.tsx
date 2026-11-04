@@ -1,7 +1,16 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { resolveListingType } from "@/lib/benchmarks"
+import {
+  computeBenchmark,
+  aggregateBookings,
+  getPlNeighborhoodCache,
+  setPlNeighborhoodCache,
+  extractPlBenchmark,
+  type PropertyMeta,
+  type PlNeighborhoodData,
+} from "@/lib/benchmarks"
+import { fetchNeighborhoodData } from "@/lib/pricelabs"
 import {
   SettingsClient,
   type SettingsData,
@@ -29,13 +38,17 @@ export default async function SettingsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }, { data: benchPropData }] = await Promise.all([
+  const comp90Start = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
+  const todayStr    = new Date().toISOString().slice(0, 10)
+
+  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }, { data: benchPropData }, { data: comp90Data }] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
     admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
+    admin.from("bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).gte("arrival", comp90Start).lt("arrival", todayStr),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -122,6 +135,53 @@ export default async function SettingsPage() {
   const marketAdrNum = parseFloat(rawSettings.market_adr ?? "207") || 207
   const marketOccNum = parseFloat(rawSettings.market_occupancy ?? "57") || 57
 
+  // Sibling map for benchmark comparables
+  const benchSiblingMap     = new Map<string, Set<string>>()
+  const benchGroupsByParent = new Map<string, string[]>()
+  for (const p of propData ?? []) {
+    if (p.parent_property_id) {
+      const arr = benchGroupsByParent.get(p.parent_property_id) ?? []
+      arr.push(p.id)
+      benchGroupsByParent.set(p.parent_property_id, arr)
+    }
+  }
+  for (const [parentId, children] of benchGroupsByParent) {
+    const all = [parentId, ...children]
+    for (const memberId of all) {
+      benchSiblingMap.set(memberId, new Set(all.filter(id => id !== memberId)))
+    }
+  }
+
+  const hiddenSet        = new Set(hiddenIds)
+  const benchAggBookings = aggregateBookings(comp90Data ?? [])
+  const benchActiveProps : PropertyMeta[] = ((benchPropData ?? []) as RawBenchProp[]).map(p => ({
+    id                           : p.id,
+    external_name                : p.external_name,
+    internal_name                : p.internal_name ?? null,
+    bedrooms                     : p.bedrooms ?? null,
+    listing_type                 : p.listing_type ?? null,
+    benchmark_adr_override       : p.benchmark_adr_override != null ? Number(p.benchmark_adr_override) : null,
+    benchmark_occupancy_override : p.benchmark_occupancy_override != null ? Number(p.benchmark_occupancy_override) : null,
+  }))
+
+  const benchPlApiKey = rawSettings.pricelabs_api_key || null
+  const benchPlMap    = new Map<string, PlNeighborhoodData>()
+  for (const p of (benchPropData ?? []) as RawBenchProp[]) {
+    if (!p.pricelabs_listing_id) continue
+    let cached = await getPlNeighborhoodCache(admin, p.pricelabs_listing_id)
+    if (!cached && benchPlApiKey) {
+      const r = await fetchNeighborhoodData(benchPlApiKey, p.pricelabs_listing_id, "ownerrez")
+      if (r.ok) {
+        const extracted = extractPlBenchmark(r.payload, p.bedrooms ?? null)
+        if (extracted) {
+          await setPlNeighborhoodCache(admin, p.pricelabs_listing_id, extracted)
+          cached = extracted
+        }
+      }
+    }
+    if (cached) benchPlMap.set(p.id, cached)
+  }
+
   const benchmarkProperties: BenchmarkPropertyRow[] = ((benchPropData ?? []) as RawBenchProp[]).map(p => {
     const oAdr = p.benchmark_adr_override != null ? Number(p.benchmark_adr_override) : null
     const oOcc = p.benchmark_occupancy_override != null ? Number(p.benchmark_occupancy_override) : null
@@ -129,6 +189,25 @@ export default async function SettingsPage() {
     const benchmarkLabel = hasOverride
       ? `your target ($${Math.round(oAdr!)} ADR, ${oOcc!}% occ)`
       : `auto — similar listings or Appleton market`
+    const propMeta: PropertyMeta = {
+      id                           : p.id,
+      external_name                : p.external_name,
+      internal_name                : p.internal_name ?? null,
+      bedrooms                     : p.bedrooms ?? null,
+      listing_type                 : p.listing_type ?? null,
+      benchmark_adr_override       : oAdr,
+      benchmark_occupancy_override : oOcc,
+    }
+    const bench = computeBenchmark({
+      property     : propMeta,
+      allProperties: benchActiveProps,
+      aggBookings  : benchAggBookings,
+      hiddenIds    : hiddenSet,
+      siblingIds   : benchSiblingMap.get(p.id) ?? new Set(),
+      marketAdr    : marketAdrNum,
+      marketOcc    : marketOccNum,
+      plData       : benchPlMap.get(p.id) ?? null,
+    })
     return {
       id                          : p.id,
       name                        : p.internal_name || p.external_name,
@@ -138,6 +217,7 @@ export default async function SettingsPage() {
       benchmark_occupancy_override: oOcc,
       pricelabs_listing_id        : p.pricelabs_listing_id ?? null,
       benchmarkLabel,
+      benchmarkSource             : bench.source,
     }
   })
 

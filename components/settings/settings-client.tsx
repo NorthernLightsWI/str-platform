@@ -48,6 +48,7 @@ export type BenchmarkPropertyRow = {
   benchmark_occupancy_override: number | null
   pricelabs_listing_id        : string | null
   benchmarkLabel              : string
+  benchmarkSource             : "override" | "pl_neighborhood" | "comparable" | "comparable_scaled" | "market"
 }
 
 export type PriceLabsPropertyRow = {
@@ -1320,6 +1321,7 @@ function BenchmarksTab({
     benchmark_occupancy_override: p.benchmark_occupancy_override,
     pricelabs_listing_id        : p.pricelabs_listing_id,
     benchmarkLabel              : p.benchmarkLabel,
+    benchmarkSource             : p.benchmarkSource,
   })))
 
   const [propSaving, startPropSave] = useTransition()
@@ -1492,13 +1494,13 @@ function BenchmarksTab({
             <span />
           </div>
           {rows.map(r => {
-            const hasOverride = r.benchmark_adr_override != null && r.benchmark_occupancy_override != null &&
-              r.benchmark_adr_override > 0 && r.benchmark_occupancy_override > 0
-            const sourceBadge = hasOverride
-              ? <span className="rounded-full bg-[#E88159]/15 text-[#E88159] border border-[#E88159]/30 text-[10px] px-1.5 py-0.5 font-medium">override</span>
-              : r.pricelabs_listing_id
-                ? <span className="rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[10px] px-1.5 py-0.5 font-medium">PL mapped</span>
-                : <span className="rounded-full bg-muted/40 text-muted-foreground border border-border text-[10px] px-1.5 py-0.5 font-medium">auto</span>
+            const sourceBadge = {
+              override         : <span className="rounded-full bg-[#E88159]/15 text-[#E88159] border border-[#E88159]/30 text-[10px] px-1.5 py-0.5 font-medium">override</span>,
+              pl_neighborhood  : <span className="rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[10px] px-1.5 py-0.5 font-medium">PL data</span>,
+              comparable       : <span className="rounded-full bg-[#6FA1AF]/15 text-[#6FA1AF] border border-[#6FA1AF]/30 text-[10px] px-1.5 py-0.5 font-medium">comps</span>,
+              comparable_scaled: <span className="rounded-full bg-[#6FA1AF]/15 text-[#6FA1AF] border border-[#6FA1AF]/30 text-[10px] px-1.5 py-0.5 font-medium">scaled</span>,
+              market           : <span className="rounded-full bg-muted/40 text-muted-foreground border border-border text-[10px] px-1.5 py-0.5 font-medium">market</span>,
+            }[r.benchmarkSource]
             return (
               <div key={r.id} className="grid grid-cols-[1fr_52px_120px_100px_100px_80px_auto] gap-2 items-center">
                 <div className="min-w-0">
