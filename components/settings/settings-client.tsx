@@ -433,6 +433,11 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
   const [suggesting,  startSuggest]   = useTransition()
   const [suggestErr,  setSuggestErr]  = useState<string | null>(null)
 
+  // Suggest floors state
+  const [suggestingFloors, startSuggestFloors] = useTransition()
+  const [floorSuggestMsg,  setFloorSuggestMsg]  = useState<string | null>(null)
+  const [floorSuggestErr,  setFloorSuggestErr]  = useState<string | null>(null)
+
   // Tag test state
   const [tagListingId, setTagListingId] = useState("")
   const [tagTesting,   setTagTesting]   = useState(false)
@@ -493,6 +498,37 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
     setDismissed(d => new Set([...d, s.propertyId]))
   }
 
+  function handleSuggestFloors() {
+    setFloorSuggestErr(null)
+    setFloorSuggestMsg(null)
+    startSuggestFloors(async () => {
+      // Reuse already-loaded listings or fetch now (read-only)
+      let listings = plListings
+      if (listings.length === 0) {
+        const res = await fetchPriceLabsListings()
+        if (!res.ok) { setFloorSuggestErr(res.error); return }
+        listings = res.listings
+        setPlListings(listings)
+      }
+
+      let filled = 0, noMin = 0, notFound = 0
+      setRows(prev => prev.map(r => {
+        if (!r.pricelabs_listing_id) return r
+        const pl = listings.find(l => l.id === r.pricelabs_listing_id)
+        if (!pl)       { notFound++; return r }
+        if (pl.min == null) { noMin++;   return r }
+        filled++
+        return { ...r, pricelabs_price_floor: pl.min }
+      }))
+
+      const parts: string[] = []
+      if (filled    > 0) parts.push(`${filled} floor${filled !== 1 ? "s" : ""} filled from PriceLabs min`)
+      if (noMin     > 0) parts.push(`${noMin} skipped — no min set in PriceLabs`)
+      if (notFound  > 0) parts.push(`${notFound} listing ID not found in account`)
+      setFloorSuggestMsg(parts.join(" · ") || "No mapped listings found")
+    })
+  }
+
   const activeSuggestions = suggestions.filter(s => !dismissed.has(s.propertyId))
   const mappedPlIds       = new Set(rows.map(r => r.pricelabs_listing_id).filter(Boolean))
   const unmatchedPl       = plListings.filter(pl => !mappedPlIds.has(pl.id))
@@ -539,7 +575,7 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
           proposals that would go below that value.
         </p>
 
-        {/* Suggest matches */}
+        {/* Suggest matches + Suggest floors */}
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={handleSuggest}
@@ -549,7 +585,17 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
             Suggest matches
           </button>
-          {suggestErr && <span className="text-xs text-red-400">{suggestErr}</span>}
+          <button
+            onClick={handleSuggestFloors}
+            disabled={suggestingFloors}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            {suggestingFloors ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            Suggest floors
+          </button>
+          {suggestErr      && <span className="text-xs text-red-400">{suggestErr}</span>}
+          {floorSuggestErr && <span className="text-xs text-red-400">{floorSuggestErr}</span>}
+          {floorSuggestMsg && <span className="text-xs text-[#6FA1AF]">{floorSuggestMsg}</span>}
         </div>
 
         {/* Suggestions panel */}
@@ -596,48 +642,65 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
         )}
 
         <div className="space-y-2">
-          <div className="grid grid-cols-[1fr_1fr_120px_32px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div className="grid grid-cols-[1fr_1fr_90px_68px_68px_32px] gap-3 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <span>Property</span>
             <span>PriceLabs Listing ID</span>
-            <span>Price Floor ($)</span>
+            <span>Floor ($)</span>
+            <span>PL Min</span>
+            <span>PL Base</span>
             <span />
           </div>
-          {rows.map(r => (
-            <div key={r.id} className="grid grid-cols-[1fr_1fr_120px_32px] gap-3 items-center">
-              <span className="text-sm text-foreground truncate">{r.name}</span>
-              <input
-                type="text"
-                value={r.pricelabs_listing_id ?? ""}
-                onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
-                placeholder="e.g. 12345"
-                className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
-              />
-              <input
-                type="number"
-                min={0}
-                value={r.pricelabs_price_floor ?? ""}
-                onChange={e => setRow(r.id, "pricelabs_price_floor", e.target.value)}
-                placeholder="None"
-                className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
-              />
-              <button
-                title="Verify prices (read-only, next 30 days)"
-                disabled={!r.pricelabs_listing_id || (verifying && verifyTarget?.id === r.pricelabs_listing_id)}
-                onClick={() => handleVerifyPrices(r)}
-                className={cn(
-                  "flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
-                  verifyTarget?.id === r.pricelabs_listing_id
-                    ? "bg-[#6FA1AF]/20 text-[#6FA1AF]"
-                    : "text-muted-foreground hover:text-[#6FA1AF] hover:bg-[#6FA1AF]/10"
-                )}
-              >
-                {verifying && verifyTarget?.id === r.pricelabs_listing_id
-                  ? <Loader2 className="size-3.5 animate-spin" />
-                  : <BarChart2 className="size-3.5" />
-                }
-              </button>
-            </div>
-          ))}
+          {rows.map(r => {
+            const pl = plListings.find(l => l.id === r.pricelabs_listing_id)
+            return (
+              <div key={r.id} className="grid grid-cols-[1fr_1fr_90px_68px_68px_32px] gap-3 items-center">
+                <span className="text-sm text-foreground truncate">{r.name}</span>
+                <input
+                  type="text"
+                  value={r.pricelabs_listing_id ?? ""}
+                  onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
+                  placeholder="e.g. 12345"
+                  className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  value={r.pricelabs_price_floor ?? ""}
+                  onChange={e => setRow(r.id, "pricelabs_price_floor", e.target.value)}
+                  placeholder="None"
+                  className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                />
+                {/* PL Min — shown once listings are loaded; amber if null */}
+                <span className={cn(
+                  "text-xs font-mono",
+                  !pl ? "text-muted-foreground" :
+                  pl.min == null ? "text-amber-400" : "text-foreground"
+                )}>
+                  {!pl ? "—" : pl.min != null ? `$${pl.min}` : "none"}
+                </span>
+                {/* PL Base — labeled source-unknown per API (no base_type field) */}
+                <span className="text-xs font-mono text-muted-foreground" title="Source unknown — PriceLabs API does not indicate whether this is user-set or calculated">
+                  {!pl ? "—" : pl.base != null ? `$${pl.base}` : "—"}
+                </span>
+                <button
+                  title="Verify prices (read-only, next 30 days)"
+                  disabled={!r.pricelabs_listing_id || (verifying && verifyTarget?.id === r.pricelabs_listing_id)}
+                  onClick={() => handleVerifyPrices(r)}
+                  className={cn(
+                    "flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+                    verifyTarget?.id === r.pricelabs_listing_id
+                      ? "bg-[#6FA1AF]/20 text-[#6FA1AF]"
+                      : "text-muted-foreground hover:text-[#6FA1AF] hover:bg-[#6FA1AF]/10"
+                  )}
+                >
+                  {verifying && verifyTarget?.id === r.pricelabs_listing_id
+                    ? <Loader2 className="size-3.5 animate-spin" />
+                    : <BarChart2 className="size-3.5" />
+                  }
+                </button>
+              </div>
+            )
+          })}
         </div>
 
         {/* Verify prices inline panel (task 2 + task 5 base price label) */}
