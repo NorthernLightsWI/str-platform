@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { computeImpact, type ImpactBooking, type ListingChange } from "@/lib/change-impact"
 
 export async function GET(
@@ -31,7 +30,7 @@ export async function GET(
 
   // Fetch the change
   const { data: change, error: changeErr } = await (admin as any)
-    .from("listing_changes")
+    .from("visible_listing_changes")
     .select("*")
     .eq("id", id)
     .single()
@@ -50,26 +49,23 @@ export async function GET(
     { data: bookingData },
     { data: allChangesData },
     { data: propertiesData },
-    hiddenIds,
   ] = await Promise.all([
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, net_revenue, booked_at")
       .neq("is_block", true)
       .neq("status", "cancelled")
       .gte("arrival", rangeStart),
 
     (admin as any)
-      .from("listing_changes")
+      .from("visible_listing_changes")
       .select("id, property_id, applied_at, status")
       .eq("status", "active"),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, parent_property_id")
       .eq("is_active", true),
-
-    getHiddenPropertyIds(),
   ])
 
   const allBookings: ImpactBooking[] = (bookingData ?? []).map((b: any) => ({
@@ -88,7 +84,7 @@ export async function GET(
     allBookings,
     allProperties: propertiesData ?? [],
     allChanges,
-    hiddenIds,
+    hiddenIds    : new Set<string>(),
     windowDays,
     today,
   })

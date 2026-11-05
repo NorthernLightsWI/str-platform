@@ -16,7 +16,6 @@ import {
   getPlNeighborhoodCache,
   type PropertyMeta,
 } from "@/lib/benchmarks"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -655,7 +654,6 @@ export async function getPropertyBenchmarkTiers(
       { data: allPropsRaw },
       { data: comp90Raw },
       { data: propGroupsRaw },
-      hiddenIds,
       { marketAdr, marketOcc },
     ] = await Promise.all([
       (admin as any)
@@ -665,24 +663,23 @@ export async function getPropertyBenchmarkTiers(
         .single(),
 
       (admin as any)
-        .from("properties")
+        .from("visible_properties")
         .select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
         .eq("is_active", true),
 
-      admin
-        .from("bookings")
+      (admin as any)
+        .from("visible_bookings")
         .select("property_id, arrival, departure, net_revenue, total_amount")
         .neq("status", "cancelled")
         .eq("is_block", false)
         .gte("arrival", new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10))
         .lt("arrival", new Date().toISOString().slice(0, 10)),
 
-      admin
-        .from("properties")
+      (admin as any)
+        .from("visible_properties")
         .select("id, parent_property_id")
         .eq("is_active", true),
 
-      getHiddenPropertyIds(),
       getMarketDefaults(admin),
     ])
 
@@ -776,7 +773,6 @@ export async function getPropertyBenchmarkTiers(
     const sameBedMetrics = allProps
       .filter(p =>
         p.id !== propertyId &&
-        !hiddenIds.has(p.id) &&
         !siblingIds.has(p.id) &&
         p.bedrooms === propBedrooms &&
         resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
@@ -810,7 +806,6 @@ export async function getPropertyBenchmarkTiers(
     const scaledMetrics: CB[] = allProps
       .filter(p =>
         p.id !== propertyId &&
-        !hiddenIds.has(p.id) &&
         !siblingIds.has(p.id) &&
         resolveListingType(p.listing_type, p.internal_name ?? p.external_name) === propType,
       )
@@ -863,7 +858,7 @@ export async function getPropertyBenchmarkTiers(
       property     : propMeta,
       allProperties: allProps,
       aggBookings,
-      hiddenIds,
+      hiddenIds    : new Set<string>(),
       siblingIds,
       marketAdr,
       marketOcc,

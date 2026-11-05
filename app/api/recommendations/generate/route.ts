@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
 
 const PERIOD_DAYS   = 90
@@ -335,23 +334,22 @@ async function generateRecommendations() {
   const admin = createAdminClient()
   const today = new Date()
 
-  const [{ data: propertiesRaw, error: propErr }, { data: propGroupsData }, hiddenIds] = await Promise.all([
-    admin
-      .from("properties")
+  const [{ data: propertiesRaw, error: propErr }, { data: propGroupsData }] = await Promise.all([
+    (admin as any)
+      .from("visible_properties")
       .select("id, internal_name, external_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override")
       .eq("is_active", true),
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, parent_property_id")
       .eq("is_active", true),
-    getHiddenPropertyIds(),
   ])
 
   if (propErr || !propertiesRaw?.length) {
     return NextResponse.json({ error: "No active properties" }, { status: 400 })
   }
 
-  const properties = propertiesRaw.filter(p => !hiddenIds.has(p.id)) as PropertyMeta[]
+  const properties = (propertiesRaw ?? []) as PropertyMeta[]
   if (!properties.length) {
     return NextResponse.json({ generated: 0, resolved: 0, properties: 0 })
   }
@@ -391,16 +389,16 @@ async function generateRecommendations() {
     { data: reviews },
     { data: existingRecs },
   ] = await Promise.all([
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
       .gte("arrival", cutoffStr)
       .lt("arrival", todayStr),
 
-    admin
-      .from("bookings")
+    (admin as any)
+      .from("visible_bookings")
       .select("property_id, arrival, departure")
       .neq("status", "cancelled")
       .eq("is_block", false)
@@ -408,19 +406,19 @@ async function generateRecommendations() {
       .lte("arrival", future60Str)
       .order("arrival", { ascending: true }),
 
-    admin
-      .from("reviews")
+    (admin as any)
+      .from("visible_reviews")
       .select("property_id")
       .in("property_id", propertyIds),
 
     // Fetch existing active recs that have a rule_key (eligible for upsert / auto-resolve)
-    admin
-      .from("recommendations")
+    (admin as any)
+      .from("visible_recommendations")
       .select("id, property_id, rule_key")
       .in("property_id", propertyIds)
       .eq("is_dismissed", false)
-      .eq("is_completed" as any, false)
-      .not("rule_key" as any, "is", null),
+      .eq("is_completed", false)
+      .not("rule_key", "is", null),
   ])
 
   // ── Build lookup: `{property_id}|{rule_key}` → existing rec id ────────────
@@ -492,7 +490,7 @@ async function generateRecommendations() {
       property     : p,
       allProperties: properties,
       aggBookings,
-      hiddenIds,
+      hiddenIds    : new Set<string>(),
       siblingIds   : siblingMap.get(p.id) ?? new Set(),
       marketAdr,
       marketOcc,
@@ -550,7 +548,7 @@ async function generateRecommendations() {
   // ── Upsert all generated rows ─────────────────────────────────────────────
   let generated = 0
   if (toUpsert.length) {
-    const { error: upsertErr } = await admin
+    const { error: upsertErr } = await (admin as any)
       .from("recommendations")
       .upsert(toUpsert as any, { onConflict: "id" })
     if (upsertErr) return NextResponse.json({ error: upsertErr.message }, { status: 500 })
@@ -570,7 +568,7 @@ async function generateRecommendations() {
 
   let resolved = 0
   if (toAutoResolveIds.length) {
-    const { error: resolveErr } = await admin
+    const { error: resolveErr } = await (admin as any)
       .from("recommendations")
       .update({
         is_completed : true,

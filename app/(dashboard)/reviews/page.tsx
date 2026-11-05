@@ -4,8 +4,8 @@ import { ReviewsClient, type ReviewData } from "@/components/reviews/reviews-cli
 export default async function ReviewsPage() {
   const admin = createAdminClient()
 
-  const { data } = await admin
-    .from("reviews")
+  const { data } = await (admin as any)
+    .from("visible_reviews")
     .select(`
       id, reviewer_name, listing_site,
       overall_rating, cleanliness_rating, communication_rating,

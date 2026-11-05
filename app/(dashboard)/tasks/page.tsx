@@ -1,13 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { TasksClient, type TaskRow } from "@/components/tasks/tasks-client"
 
 export default async function TasksPage() {
   const admin = createAdminClient() as any
 
-  const [{ data }, hiddenIds] = await Promise.all([
+  const [{ data }] = await Promise.all([
     admin
-      .from("tasks")
+      .from("visible_tasks")
       .select(`
         id, property_id, title, description,
         priority, status,
@@ -16,8 +15,6 @@ export default async function TasksPage() {
         properties(internal_name, external_name)
       `)
       .order("created_at", { ascending: false }),
-
-    getHiddenPropertyIds(),
   ])
 
   type RawTask = {
@@ -35,7 +32,6 @@ export default async function TasksPage() {
   }
 
   const tasks: TaskRow[] = ((data ?? []) as RawTask[])
-    .filter(t => !hiddenIds.has(t.property_id))
     .map(t => ({
       id                      : t.id,
       property_id             : t.property_id,

@@ -16,8 +16,6 @@ import {
   testPriceLabsConnection,
   inviteCleaner,
   deleteUser,
-  setHiddenProperties,
-  setPropertyParent,
   savePriceLabsPropertySettings,
   saveBenchmarkPropertySettings,
   fetchPriceLabsListings,
@@ -28,6 +26,8 @@ import {
   type TierResult,
   type VerifyPricesDay,
 } from "@/app/actions/settings"
+import { PropertyVisibilityTab, type PropertyVisibilityRow } from "@/components/settings/visibility-tab"
+import { GroupsTab, type PropertyGroupRow } from "@/components/settings/groups-tab"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,7 @@ export type SettingsData = {
 export type BenchmarkPropertyRow = {
   id                          : string
   name                        : string
+  is_hidden                   : boolean
   bedrooms                    : number | null
   listing_type                : string | null
   benchmark_adr_override      : number | null
@@ -57,6 +58,7 @@ export type BenchmarkPropertyRow = {
 export type PriceLabsPropertyRow = {
   id                   : string
   name                 : string
+  is_hidden            : boolean
   pricelabs_listing_id : string | null
   pricelabs_price_floor: number | null
 }
@@ -81,20 +83,7 @@ export type SyncLogRow = {
   created_at     : string
 }
 
-export type PropertyVisibilityRow = {
-  id        : string
-  name      : string
-  is_active : boolean
-}
-
-export type PropertyGroupRow = {
-  id                 : string
-  name               : string
-  is_active          : boolean
-  parent_property_id : string | null
-}
-
-type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs" | "benchmarks"
+type Tab ="integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs" | "benchmarks"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -422,7 +411,8 @@ function jaccardSim(a: string, b: string): number {
 }
 
 function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLabsPropertyRow[] }) {
-  const [rows,       setRows]       = useState(initialProperties)
+  const [rows,            setRows]            = useState(initialProperties)
+  const [showHiddenPl,    setShowHiddenPl]    = useState(false)
   const [saving,     startSave]     = useTransition()
   const [result,     setResult]     = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
 
@@ -542,8 +532,12 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
   }
 
   const activeSuggestions = suggestions.filter(s => !dismissed.has(s.propertyId))
+  const visibleRows       = rows.filter(r => !r.is_hidden)
+  const hiddenRows        = rows.filter(r => r.is_hidden)
   const mappedPlIds       = new Set(rows.map(r => r.pricelabs_listing_id).filter(Boolean))
-  const unmatchedPl       = plListings.filter(pl => !mappedPlIds.has(pl.id))
+  // Only count unmatched PL listings not belonging to hidden properties
+  const hiddenPlIds       = new Set(hiddenRows.map(r => r.pricelabs_listing_id).filter(Boolean))
+  const unmatchedPl       = plListings.filter(pl => !mappedPlIds.has(pl.id) && !hiddenPlIds.has(pl.id))
 
   async function handleTagTest(action: "add" | "remove") {
     if (!tagListingId) return
@@ -664,7 +658,7 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
             <span>PL Base</span>
             <span />
           </div>
-          {rows.map(r => {
+          {visibleRows.map(r => {
             const pl = plListings.find(l => l.id === r.pricelabs_listing_id)
             // Name mismatch: Jaccard < 0.15 means very few shared tokens
             const nameMismatch = !!pl && jaccardSim(r.name, pl.name) < 0.15
@@ -736,6 +730,57 @@ function PriceLabsMappingTab({ initialProperties }: { initialProperties: PriceLa
               </div>
             )
           })}
+
+          {/* Hidden properties — collapsed section */}
+          {hiddenRows.length > 0 && (
+            <div className="mt-3 border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => setShowHiddenPl(v => !v)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span className={cn("transition-transform", showHiddenPl ? "rotate-90" : "")}>▶</span>
+                {hiddenRows.length} hidden propert{hiddenRows.length !== 1 ? "ies" : "y"} — excluded from reports
+              </button>
+              {showHiddenPl && (
+                <div className="mt-2 space-y-2 opacity-60">
+                  {hiddenRows.map(r => {
+                    const pl = plListings.find(l => l.id === r.pricelabs_listing_id)
+                    return (
+                      <div key={r.id} className="grid grid-cols-[1fr_1fr_90px_68px_68px_32px] gap-3 items-center">
+                        <span className="text-sm text-muted-foreground truncate">{r.name}</span>
+                        <div className="self-start">
+                          <input
+                            type="text"
+                            value={r.pricelabs_listing_id ?? ""}
+                            onChange={e => setRow(r.id, "pricelabs_listing_id", e.target.value)}
+                            placeholder="e.g. 12345"
+                            className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                          />
+                          {pl && <span className="mt-0.5 text-xs text-[#6FA1AF] truncate block">{pl.name}</span>}
+                        </div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.pricelabs_price_floor ?? ""}
+                          onChange={e => setRow(r.id, "pricelabs_price_floor", e.target.value)}
+                          placeholder="None"
+                          className="w-full rounded-lg border border-input bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus-visible:border-ring"
+                        />
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {loadingListings ? "…" : !pl ? "—" : pl.min != null ? `$${pl.min}` : "none"}
+                        </span>
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {loadingListings ? "…" : !pl ? "—" : pl.base != null ? `$${pl.base}` : "—"}
+                        </span>
+                        <span />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Verify prices inline panel (task 2 + task 5 base price label) */}
@@ -1305,191 +1350,6 @@ function SyncTab({ initialLog }: { initialLog: SyncLogRow[] }) {
   )
 }
 
-// ── Property Visibility tab ───────────────────────────────────────────────────
-
-function PropertyVisibilityTab({
-  initialProperties,
-  initialHiddenIds,
-}: {
-  initialProperties : PropertyVisibilityRow[]
-  initialHiddenIds  : string[]
-}) {
-  const [hidden,  setHidden]  = useState(() => new Set(initialHiddenIds))
-  const [saving,  setSaving]  = useState(false)
-
-  async function handleToggle(id: string) {
-    const next = new Set(hidden)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setHidden(next)
-    setSaving(true)
-    await setHiddenProperties(Array.from(next))
-    setSaving(false)
-  }
-
-  const total   = initialProperties.length
-  const visible = total - hidden.size
-
-  const sorted = [...initialProperties].sort((a, b) => {
-    if (a.is_active !== b.is_active) return a.is_active ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {visible} of {total} {total === 1 ? "property" : "properties"} visible
-          {saving && <span className="ml-2 text-xs text-muted-foreground/50">Saving…</span>}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Hidden properties still sync from OwnerRez
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card divide-y divide-border">
-        {sorted.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No properties found. Sync from OwnerRez first.
-          </div>
-        )}
-        {sorted.map(p => {
-          const isHidden = hidden.has(p.id)
-          return (
-            <div key={p.id} className="flex items-center justify-between px-4 py-3 gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={cn(
-                  "size-2 shrink-0 rounded-full",
-                  p.is_active ? "bg-emerald-400" : "bg-muted-foreground/30",
-                )} />
-                <span className={cn(
-                  "text-sm truncate transition-colors",
-                  isHidden ? "text-muted-foreground/40 line-through" : "text-foreground",
-                )}>
-                  {p.name}
-                </span>
-                {!p.is_active && (
-                  <span className="shrink-0 text-xs text-muted-foreground/50">inactive in OwnerRez</span>
-                )}
-              </div>
-              <button
-                role="switch"
-                aria-checked={!isHidden}
-                onClick={() => handleToggle(p.id)}
-                className={cn(
-                  "relative shrink-0 h-5 w-9 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isHidden ? "bg-muted" : "bg-primary",
-                )}
-              >
-                <span className={cn(
-                  "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all duration-200",
-                  isHidden ? "left-0.5" : "left-[1.125rem]",
-                )} />
-              </button>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Groups tab ────────────────────────────────────────────────────────────────
-
-function GroupsTab({ initialProperties }: { initialProperties: PropertyGroupRow[] }) {
-  const [props, setProps] = useState(initialProperties)
-  const [saving, setSaving] = useState<string | null>(null)  // propertyId being saved
-
-  // IDs that are already children — they cannot become parents
-  const childIds = new Set(props.filter(p => p.parent_property_id).map(p => p.id))
-
-  // Available parents: properties that aren't themselves children
-  const availableParents = props.filter(p => !childIds.has(p.id))
-
-  async function handleParentChange(propertyId: string, parentId: string) {
-    const nextParent = parentId === "" ? null : parentId
-    setSaving(propertyId)
-    const res = await setPropertyParent(propertyId, nextParent)
-    setSaving(null)
-    if (res.ok) {
-      setProps(prev => prev.map(p =>
-        p.id === propertyId ? { ...p, parent_property_id: nextParent } : p
-      ))
-    }
-  }
-
-  const sorted = [...props].sort((a, b) => {
-    if (a.is_active !== b.is_active) return a.is_active ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-
-  return (
-    <div className="space-y-4">
-      <Card title="Property Groups">
-        <p className="text-xs text-muted-foreground">
-          Group multi-listing units (e.g. weekly and monthly versions of the same unit) under
-          a parent property. Grouped properties are combined in analytics, reports, and the
-          operations overview. Only two levels deep — a child cannot itself be a parent.
-        </p>
-        <div className="rounded-xl border border-border bg-card divide-y divide-border">
-          {sorted.length === 0 && (
-            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No properties found. Sync from OwnerRez first.
-            </div>
-          )}
-          {sorted.map(p => {
-            const isChild   = !!p.parent_property_id
-            const isParent  = props.some(c => c.parent_property_id === p.id)
-            const isSaving  = saving === p.id
-            const parentOptions = availableParents.filter(pp => pp.id !== p.id)
-
-            return (
-              <div key={p.id} className="flex items-center justify-between px-4 py-3 gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    p.is_active ? "bg-emerald-400" : "bg-muted-foreground/30",
-                  )} />
-                  <div className="min-w-0">
-                    <span className="text-sm text-foreground truncate block">{p.name}</span>
-                    {isParent && (
-                      <span className="text-[10px] text-blue-400 font-medium uppercase tracking-wide">
-                        Parent
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {isSaving && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-                  {isParent ? (
-                    <span className="text-xs text-muted-foreground italic">
-                      {props.filter(c => c.parent_property_id === p.id).length} child
-                      {props.filter(c => c.parent_property_id === p.id).length !== 1 ? "ren" : ""}
-                    </span>
-                  ) : (
-                    <select
-                      value={p.parent_property_id ?? ""}
-                      onChange={e => handleParentChange(p.id, e.target.value)}
-                      disabled={!!saving}
-                      className="rounded-lg border border-input bg-white px-2.5 py-1.5 text-xs text-gray-900 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 disabled:opacity-50 max-w-[200px]"
-                    >
-                      <option value="">No parent (standalone)</option>
-                      {parentOptions.map(pp => (
-                        <option key={pp.id} value={pp.id}>{pp.name}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </Card>
-    </div>
-  )
-}
-
 // ── Reports tab ───────────────────────────────────────────────────────────────
 
 function ReportsTab({ initialEmail }: { initialEmail: string }) {
@@ -1611,6 +1471,7 @@ function BenchmarksTab({
   const [rows, setRows] = useState(benchmarkProperties.map(p => ({
     id                          : p.id,
     name                        : p.name,
+    is_hidden                   : p.is_hidden,
     bedrooms                    : p.bedrooms,
     listing_type                : p.listing_type,
     benchmark_adr_override      : p.benchmark_adr_override,
@@ -1622,6 +1483,9 @@ function BenchmarksTab({
 
   const [propSaving, startPropSave] = useTransition()
   const [propResult, setPropResult] = useState<{ ok?: boolean; error?: string; message?: string } | null>(null)
+
+  const [showHiddenBench, setShowHiddenBench] = useState(false)
+  const displayRows = showHiddenBench ? rows : rows.filter(r => !r.is_hidden)
 
   // Compare sources modal
   const [compareId,      setCompareId]      = useState<string | null>(null)
@@ -1779,6 +1643,18 @@ function BenchmarksTab({
           fallback. Leave blank to use automatic benchmark resolution.
         </p>
 
+        {rows.some(r => r.is_hidden) && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none w-fit">
+            <input
+              type="checkbox"
+              checked={showHiddenBench}
+              onChange={e => setShowHiddenBench(e.target.checked)}
+              className="accent-primary"
+            />
+            Show hidden properties
+          </label>
+        )}
+
         <div className="space-y-2">
           <div className="grid grid-cols-[1fr_52px_120px_100px_100px_80px_auto] gap-2 px-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <span>Property</span>
@@ -1789,7 +1665,7 @@ function BenchmarksTab({
             <span>Source</span>
             <span />
           </div>
-          {rows.map(r => {
+          {displayRows.map(r => {
             const sourceBadge = {
               override         : <span className="rounded-full bg-[#E88159]/15 text-[#E88159] border border-[#E88159]/30 text-[10px] px-1.5 py-0.5 font-medium">override</span>,
               pl_neighborhood  : <span className="rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30 text-[10px] px-1.5 py-0.5 font-medium">PL data</span>,

@@ -176,7 +176,7 @@ export async function markRecurringComplete(
 
   const admin = createAdminClient() as any
   const { data: item } = await admin
-    .from("recurring_maintenance")
+    .from("visible_recurring_maintenance")
     .select("item_name, interval_days, property_id")
     .eq("id", id)
     .single()

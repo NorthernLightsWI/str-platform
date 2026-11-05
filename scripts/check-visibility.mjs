@@ -79,6 +79,14 @@ for (const file of files) {
     TABLE_PATTERN.lastIndex = 0
     let m
     while ((m = TABLE_PATTERN.exec(lines[i])) !== null) {
+      // Look at this line + next 3 lines to find the first chained method after .from("table")
+      const window    = lines.slice(i, Math.min(i + 4, lines.length)).join(" ")
+      const fromToken = `.from("${m[1]}")`
+      const afterFrom = window.slice(window.indexOf(fromToken) + fromToken.length)
+      const firstWrite = afterFrom.search(/\.(insert|update|delete|upsert)\(/)
+      const firstRead  = afterFrom.search(/\.select\(/)
+      // Skip confirmed writes: write method appears before any SELECT
+      if (firstWrite >= 0 && (firstRead < 0 || firstWrite < firstRead)) continue
       violations.push(`${rel}:${i + 1}: raw table access to "${m[1]}" — use visible_${m[1]} or add to allowlist`)
     }
   }

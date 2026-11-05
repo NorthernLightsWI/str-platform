@@ -3,14 +3,13 @@ import {
   RecommendationsClient,
   type RecommendationData,
 } from "@/components/recommendations/recommendations-client"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 
 export default async function RecommendationsPage() {
   const admin = createAdminClient()
 
-  const [{ data }, { data: propData }, hiddenIds] = await Promise.all([
-    admin
-      .from("recommendations")
+  const [{ data }, { data: propData }] = await Promise.all([
+    (admin as any)
+      .from("visible_recommendations")
       .select(`
         id, property_id, title, body, priority, category,
         impact_statement, action_steps,
@@ -19,13 +18,11 @@ export default async function RecommendationsPage() {
       `)
       .order("created_at", { ascending: false }),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name")
       .eq("is_active", true)
       .order("external_name"),
-
-    getHiddenPropertyIds(),
   ])
 
   type RawRec = {
@@ -45,7 +42,6 @@ export default async function RecommendationsPage() {
   }
 
   const recs: RecommendationData[] = ((data ?? []) as unknown as RawRec[])
-    .filter(r => !r.property_id || !hiddenIds.has(r.property_id))
     .map(r => ({
     id               : r.id,
     property_id      : r.property_id,
@@ -66,8 +62,7 @@ export default async function RecommendationsPage() {
 
   const activeCount = recs.filter(r => !r.is_dismissed && !r.is_completed).length
 
-  const properties = (propData ?? [])
-    .filter(p => !hiddenIds.has(p.id))
+  const properties = ((propData ?? []) as { id: string; external_name: string; internal_name: string | null }[])
     .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
 
   return (

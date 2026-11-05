@@ -4,9 +4,9 @@
     "app/api/sync/ownerrez/route.ts",
     "app/api/sync/reviews/route.ts",
     "app/api/sync/amenities/route.ts",
-    "components/settings/settings-client.tsx",
-    "app/actions/settings.ts",
-    "app/actions/proposed-changes.ts",
+    "components/settings/visibility-tab.tsx",
+    "components/settings/groups-tab.tsx",
+    "app/(dashboard)/properties/[id]/page.tsx",
     "lib/visible.ts",
     "lib/hidden-properties.ts"
   ],

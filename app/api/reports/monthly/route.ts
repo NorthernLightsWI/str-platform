@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { parseHiddenIds }    from "@/lib/hidden-properties"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
 import {
   buildMonthlyEmailHtml,
@@ -56,26 +55,26 @@ async function generateAndSendReport(): Promise<NextResponse> {
     { data: amenityRows },
   ] = await Promise.all([
     supabase.from("app_settings").select("key, value"),
-    (supabase as any).from("properties").select("id, internal_name, external_name, parent_property_id, is_active"),
-    (supabase as any).from("bookings")
+    (supabase as any).from("visible_properties").select("id, internal_name, external_name, parent_property_id, is_active"),
+    (supabase as any).from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.start)
       .lt("arrival", period.end)
       .neq("is_block", true)
       .neq("status", "cancelled"),
-    (supabase as any).from("bookings")
+    (supabase as any).from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
       .gte("arrival", period.prevStart)
       .lt("arrival", period.prevEnd)
       .neq("is_block", true)
       .neq("status", "cancelled"),
-    (supabase as any).from("reviews")
+    (supabase as any).from("visible_reviews")
       .select("property_id, overall_rating"),
-    (supabase as any).from("recommendations")
+    (supabase as any).from("visible_recommendations")
       .select("property_id, title, priority, is_dismissed, is_completed")
       .eq("is_dismissed", false)
       .eq("is_completed", false),
-    (supabase as any).from("property_amenities")
+    (supabase as any).from("visible_property_amenities")
       .select("property_id, amenity_key, is_present"),
   ])
 
@@ -92,8 +91,6 @@ async function generateAndSendReport(): Promise<NextResponse> {
     return NextResponse.json({ error: "report_email not set in app_settings" }, { status: 400 })
   }
 
-  const hiddenIds = parseHiddenIds(settingsRows?.find(r => r.key === "hidden_properties")?.value)
-
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey || resendKey.startsWith("re_placeholder")) {
     return NextResponse.json({ error: "RESEND_API_KEY not configured" }, { status: 400 })
@@ -104,9 +101,9 @@ async function generateAndSendReport(): Promise<NextResponse> {
 
   const currBookPropIds = new Set((currBookings ?? []).map((b: { property_id: string }) => b.property_id))
 
-  // Include active properties + inactive properties with bookings in the current period
+  // visible_properties already excludes hidden; include active + inactive with current bookings
   const allProps    = ((properties ?? []) as RawProp[])
-    .filter(p => !hiddenIds.has(p.id) && (p.is_active || currBookPropIds.has(p.id)))
+    .filter(p => p.is_active || currBookPropIds.has(p.id))
   const groups      = buildPropertyGroups(allProps)
   const cids        = childIdSet(groups)
   // Build map: child ID → [all sibling IDs including self and parent]

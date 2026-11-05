@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import { updatePriceLabsListings } from "@/lib/pricelabs"
 import { MANUAL_ONLY_CHANGE_TYPES } from "@/lib/change-impact"
 import type { ChangeTypeValue } from "@/lib/change-impact"
@@ -50,18 +49,19 @@ export async function createProposal(data: {
   const user = await getAdminUser()
   if (!user) return { error: "Forbidden — admin only" }
 
-  const admin     = createAdminClient()
-  const hiddenIds = await getHiddenPropertyIds()
-  if (hiddenIds.has(data.property_id)) {
+  const admin = createAdminClient()
+
+  // Reject hidden properties — visible_properties excludes is_hidden=true
+  const { data: visibleProp } = await (admin as any)
+    .from("visible_properties")
+    .select("id, pricelabs_listing_id")
+    .eq("id", data.property_id)
+    .maybeSingle()
+  if (!visibleProp) {
     return { error: "Cannot propose changes for hidden properties" }
   }
 
-  // Fetch PriceLabs listing ID for this property
-  const { data: prop } = await (admin as any)
-    .from("properties")
-    .select("pricelabs_listing_id")
-    .eq("id", data.property_id)
-    .single()
+  const prop = visibleProp
 
   const listingId = prop?.pricelabs_listing_id ?? null
 
@@ -154,7 +154,7 @@ export async function applyProposal(
   const admin = createAdminClient()
 
   const { data: proposal } = await (admin as any)
-    .from("proposed_changes")
+    .from("visible_proposed_changes")
     .select(`*, properties ( pricelabs_listing_id, pricelabs_price_floor )`)
     .eq("id", id)
     .eq("status", "approved")
@@ -173,15 +173,9 @@ export async function applyProposal(
     return { error: "API writes are disabled — use 'I applied this manually' or enable writes in Settings → PriceLabs" }
   }
 
-  // Hidden property guardrail
-  const hiddenIds = await getHiddenPropertyIds()
-  if (hiddenIds.has(proposal.property_id)) {
-    return { error: "Cannot apply changes to hidden properties" }
-  }
-
   // Block if another pending or approved proposal exists for this property
   const { data: activeSiblings } = await (admin as any)
-    .from("proposed_changes")
+    .from("visible_proposed_changes")
     .select("id")
     .eq("property_id", proposal.property_id)
     .in("status", ["pending", "approved"])
@@ -195,7 +189,7 @@ export async function applyProposal(
   // One-per-30-days: count only truly applied proposals (not dry-run, not failed/rejected)
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
   const { data: recentApplied } = await (admin as any)
-    .from("proposed_changes")
+    .from("visible_proposed_changes")
     .select("id")
     .eq("property_id", proposal.property_id)
     .eq("status", "applied")
@@ -325,18 +319,13 @@ export async function markProposalAppliedManually(
   const admin = createAdminClient()
 
   const { data: proposal } = await (admin as any)
-    .from("proposed_changes")
+    .from("visible_proposed_changes")
     .select("*")
     .eq("id", id)
     .eq("status", "approved")
     .single()
 
   if (!proposal) return { error: "Proposal not found or not in approved status" }
-
-  const hiddenIds = await getHiddenPropertyIds()
-  if (hiddenIds.has(proposal.property_id)) {
-    return { error: "Cannot log changes for hidden properties" }
-  }
 
   // Create the listing_change row (manual)
   const { error: lcErr } = await (admin as any)

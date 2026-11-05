@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation"
 import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getHiddenPropertyIds } from "@/lib/hidden-properties"
 import {
   ProposalsClient,
   type ProposalRow,
@@ -24,9 +23,9 @@ export default async function ProposalsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: proposalData }, { data: propData }, { data: settingsData }, hiddenIds] = await Promise.all([
+  const [{ data: proposalData }, { data: propData }, { data: settingsData }] = await Promise.all([
     (admin as any)
-      .from("proposed_changes")
+      .from("visible_proposed_changes")
       .select(`
         id, property_id, change_type, label,
         current_value, proposed_value, reason, risk_note,
@@ -37,15 +36,13 @@ export default async function ProposalsPage() {
       .order("created_at", { ascending: false })
       .limit(100),
 
-    admin
-      .from("properties")
+    (admin as any)
+      .from("visible_properties")
       .select("id, external_name, internal_name")
       .eq("is_active", true)
       .order("external_name"),
 
     admin.from("app_settings").select("key, value"),
-
-    getHiddenPropertyIds(),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -74,7 +71,6 @@ export default async function ProposalsPage() {
   }
 
   const proposals: ProposalRow[] = ((proposalData ?? []) as RawProposal[])
-    .filter(p => !hiddenIds.has(p.property_id))
     .map(p => ({
       id               : p.id,
       property_id      : p.property_id,
@@ -96,8 +92,7 @@ export default async function ProposalsPage() {
       applied_at       : p.applied_at,
     }))
 
-  const properties = (propData ?? [])
-    .filter(p => !hiddenIds.has(p.id))
+  const properties = ((propData ?? []) as { id: string; external_name: string; internal_name: string | null }[])
     .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
 
   const pendingCount = proposals.filter(p => p.status === "pending" || p.status === "approved").length

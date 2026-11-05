@@ -16,11 +16,11 @@ import {
   type SettingsData,
   type UserRow,
   type SyncLogRow,
-  type PropertyVisibilityRow,
-  type PropertyGroupRow,
   type PriceLabsPropertyRow,
   type BenchmarkPropertyRow,
 } from "@/components/settings/settings-client"
+import { type PropertyVisibilityRow } from "@/components/settings/visibility-tab"
+import { type PropertyGroupRow } from "@/components/settings/groups-tab"
 
 function parseSettingValue(raw: unknown): string {
   if (typeof raw === "string") return raw
@@ -44,11 +44,11 @@ export default async function SettingsPage() {
   const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }, { data: benchPropData }, { data: comp90Data }] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
-    admin.from("sync_log").select("*").order("created_at", { ascending: false }).limit(10),
-    admin.from("properties").select("id, external_name, internal_name, is_active, parent_property_id").order("external_name"),
-    (admin as any).from("properties").select("id, external_name, internal_name, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
-    (admin as any).from("properties").select("id, external_name, internal_name, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
-    admin.from("bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).gte("arrival", comp90Start).lt("arrival", todayStr),
+    (admin as any).from("visible_sync_log").select("*").order("created_at", { ascending: false }).limit(10),
+    admin.from("properties").select("id, external_name, internal_name, is_active, is_hidden, parent_property_id").order("external_name"),
+    (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
+    (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
+    (admin as any).from("visible_bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).gte("arrival", comp90Start).lt("arrival", todayStr),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -75,7 +75,7 @@ export default async function SettingsPage() {
     created_at: u.created_at,
   }))
 
-  const syncLog: SyncLogRow[] = (logData ?? []).map(e => ({
+  const syncLog: SyncLogRow[] = ((logData ?? []) as any[]).map((e: any) => ({
     id             : e.id,
     sync_type      : e.sync_type,
     status         : e.status,
@@ -104,6 +104,7 @@ export default async function SettingsPage() {
     id                   : string
     external_name        : string
     internal_name        : string | null
+    is_hidden            : boolean
     pricelabs_listing_id : string | null
     pricelabs_price_floor: number | null
   }
@@ -111,20 +112,20 @@ export default async function SettingsPage() {
   const plProperties: PriceLabsPropertyRow[] = ((plPropData ?? []) as RawPlProp[]).map(p => ({
     id                   : p.id,
     name                 : p.internal_name || p.external_name,
+    is_hidden            : p.is_hidden ?? false,
     pricelabs_listing_id : p.pricelabs_listing_id ?? null,
     pricelabs_price_floor: p.pricelabs_price_floor != null ? Number(p.pricelabs_price_floor) : null,
   }))
 
-  let hiddenIds: string[] = []
-  try {
-    const raw = rawSettings.hidden_properties
-    if (raw) hiddenIds = JSON.parse(raw)
-  } catch { /* malformed JSON — treat as empty */ }
+  const hiddenIds: string[] = (propData ?? [])
+    .filter((p: any) => p.is_hidden)
+    .map((p: any) => p.id)
 
   type RawBenchProp = {
     id                           : string
     external_name                : string
     internal_name                : string | null
+    is_hidden                    : boolean
     bedrooms                     : number | null
     listing_type                 : string | null
     benchmark_adr_override       : number | null
@@ -211,6 +212,7 @@ export default async function SettingsPage() {
     return {
       id                          : p.id,
       name                        : p.internal_name || p.external_name,
+      is_hidden                   : p.is_hidden ?? false,
       bedrooms                    : p.bedrooms ?? null,
       listing_type                : p.listing_type ?? null,
       benchmark_adr_override      : oAdr,
