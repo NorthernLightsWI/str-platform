@@ -11,9 +11,12 @@ import {
   extractPlBenchmark,
   getPlNeighborhoodCache,
   setPlNeighborhoodCache,
+  inferListingTypeFromStays,
+  resolveListingType,
   type PropertyMeta,
   type PlNeighborhoodData,
 } from "@/lib/benchmarks"
+import { occupancyInWindow } from "@/lib/metrics"
 import { fetchNeighborhoodData } from "@/lib/pricelabs"
 
 // ── Score formula ─────────────────────────────────────────────────────────────
@@ -84,7 +87,7 @@ export default async function BenchmarksPage() {
 
     (admin as any)
       .from("visible_properties")
-      .select("id, parent_property_id")
+      .select("id, parent_property_id, internal_name, external_name")
       .eq("is_active", true),
 
     getMarketDefaults(admin),
@@ -114,7 +117,17 @@ export default async function BenchmarksPage() {
     }
   }
 
-  const comp90End     = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  // Build groupAllIdsMap: any member ID → all member IDs for that group (or [id] if standalone)
+  const groupAllIdsMap = new Map<string, string[]>()
+  for (const [parentId, children] of groupsByParent) {
+    const allGroupMembers = [parentId, ...children]
+    for (const memberId of allGroupMembers) {
+      groupAllIdsMap.set(memberId, allGroupMembers)
+    }
+  }
+
+  const yesterdayStr = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  const comp90End    = yesterdayStr
   const aggBookings90 = aggregateBookings(comp90Data ?? [], comp90Start, comp90End, todayStr)
 
   // ── PriceLabs neighborhood cache ──────────────────────────────────────────
@@ -166,6 +179,21 @@ export default async function BenchmarksPage() {
     const adr       = bookedNights > 0 ? revenue / bookedNights : 0
     const revpar    = PERIOD_DAYS  > 0 ? revenue / PERIOD_DAYS  : 0
 
+    // ── Listing type resolution ───────────────────────────────────────────────
+    const memberIds         = groupAllIdsMap.get(p.id) ?? [p.id]
+    const isManualListingType = p.listing_type === "nightly" || p.listing_type === "weekly" || p.listing_type === "monthly"
+    const staysInf          = inferListingTypeFromStays(bookingData ?? [], memberIds)
+    const resolvedListingType = resolveListingType(p.listing_type, p.internal_name ?? p.external_name, staysInf)
+    const listingTypeBasis  = isManualListingType ? "override"
+      : staysInf ? staysInf.basis
+      : "name"
+
+    // ── Unit occupancy for grouped properties ─────────────────────────────────
+    const isGrouped      = memberIds.length > 1
+    const unitOccupancy  = isGrouped
+      ? +occupancyInWindow(bookingData ?? [], memberIds, periodStartStr, yesterdayStr, 1, todayStr).toFixed(2)
+      : undefined
+
     // Use PropertyMeta shape; non-active props still get a benchmark but won't
     // appear in the comparable pool (activeProps excludes them)
     const meta: PropertyMeta = {
@@ -173,7 +201,7 @@ export default async function BenchmarksPage() {
       external_name                : p.external_name,
       internal_name                : p.internal_name ?? null,
       bedrooms                     : p.bedrooms,
-      listing_type                 : p.listing_type ?? null,
+      listing_type                 : resolvedListingType,
       benchmark_adr_override       : p.benchmark_adr_override ?? null,
       benchmark_occupancy_override : p.benchmark_occupancy_override ?? null,
     }
@@ -190,18 +218,21 @@ export default async function BenchmarksPage() {
     })
 
     return {
-      id              : p.id,
-      name            : p.internal_name || p.external_name,
-      occupancy       : +occupancy.toFixed(2),
-      adr             : +adr.toFixed(2),
-      revpar          : +revpar.toFixed(2),
-      score           : computeScore(occupancy, adr, revpar, bench.occupancy, bench.adr, bench.revpar),
-      benchmarkOcc    : bench.occupancy,
-      benchmarkAdr    : bench.adr,
-      benchmarkRevpar : bench.revpar,
-      benchmarkSource : bench.sourceLabel,
-      comparableCount : bench.comparableCount,
-      isActive        : p.is_active === true,
+      id               : p.id,
+      name             : p.internal_name || p.external_name,
+      occupancy        : +occupancy.toFixed(2),
+      adr              : +adr.toFixed(2),
+      revpar           : +revpar.toFixed(2),
+      score            : computeScore(occupancy, adr, revpar, bench.occupancy, bench.adr, bench.revpar),
+      benchmarkOcc     : bench.occupancy,
+      benchmarkAdr     : bench.adr,
+      benchmarkRevpar  : bench.revpar,
+      benchmarkSource  : bench.sourceLabel,
+      comparableCount  : bench.comparableCount,
+      isActive         : p.is_active === true,
+      listingType      : resolvedListingType,
+      listingTypeBasis,
+      unitOccupancy,
     }
   })
 

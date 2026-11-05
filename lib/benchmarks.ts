@@ -35,13 +35,35 @@ export function inferListingType(name: string): ListingType {
   return "nightly"
 }
 
+export function inferListingTypeFromStays(
+  bookings : Array<{ property_id: string; arrival: string; departure: string }>,
+  memberIds: string[],
+): { type: ListingType; basis: string } | null {
+  const memberSet = new Set(memberIds)
+  const lengths = bookings
+    .filter(b => memberSet.has(b.property_id))
+    .map(b => {
+      const a = new Date(b.arrival   + "T00:00:00Z").getTime()
+      const d = new Date(b.departure + "T00:00:00Z").getTime()
+      return Math.max(1, (d - a) / 86_400_000)
+    })
+  if (lengths.length < 3) return null
+  const sorted = [...lengths].sort((a, b) => a - b)
+  const mid    = Math.floor(sorted.length / 2)
+  const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  const type: ListingType = median >= 28 ? "monthly" : median >= 7 ? "weekly" : "nightly"
+  return { type, basis: `median stay ${Math.round(median)} nights from ${lengths.length} bookings` }
+}
+
 export function resolveListingType(
-  listingType : string | null | undefined,
-  displayName : string,                    // prefer internal_name ?? external_name
+  listingType     : string | null | undefined,
+  displayName     : string,                    // prefer internal_name ?? external_name
+  staysInference ?: { type: ListingType; basis: string } | null,
 ): ListingType {
   if (listingType === "nightly" || listingType === "weekly" || listingType === "monthly") {
     return listingType
   }
+  if (staysInference) return staysInference.type
   return inferListingType(displayName)
 }
 

@@ -7,20 +7,21 @@ import { cn } from "@/lib/utils"
 import { healthColor } from "@/lib/health-score"
 
 export type PropertyRow = {
-  id           : string
-  external_name: string
-  internal_name: string | null
-  city         : string | null
-  state        : string | null
-  bedrooms     : number | null
-  bathrooms    : number | null
-  max_guests   : number | null
-  is_active    : boolean
-  parentName   : string | null  // non-null when this is a child/grouped listing
-  mtdRevenue   : number
-  mtdOccupancy : number   // 0–100
-  mtdAdr       : number
-  healthScore  : number   // 0–100
+  id               : string
+  external_name    : string
+  internal_name    : string | null
+  city             : string | null
+  state            : string | null
+  bedrooms         : number | null
+  bathrooms        : number | null
+  max_guests       : number | null
+  is_active        : boolean
+  parentName       : string | null  // non-null when this is a child/grouped listing
+  mtdRevenue       : number
+  mtdOccupancy     : number   // 0–100
+  mtdAdr           : number
+  healthScore      : number   // 0–100
+  unitMtdOccupancy?: number   // defined only for grouped listings
 }
 
 type SortKey = "name" | "city" | "bedrooms" | "occupancy" | "adr" | "revenue" | "health"
@@ -204,6 +205,11 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
                     )}>
                       {row.mtdOccupancy > 0 ? row.mtdOccupancy.toFixed(1) + "%" : "—"}
                     </span>
+                    {row.unitMtdOccupancy !== undefined && (
+                      <div className="text-[10px] text-muted-foreground/60 leading-tight whitespace-nowrap">
+                        unit {row.unitMtdOccupancy.toFixed(1)}%
+                      </div>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-right font-medium text-foreground tabular-nums">
                     {row.mtdAdr > 0 ? fmt(row.mtdAdr) : "—"}

@@ -10,7 +10,7 @@ import { CHANGE_TYPE_LABELS } from "@/lib/change-impact"
 const CHANGE_TYPES = Object.entries(CHANGE_TYPE_LABELS) as [ChangeTypeValue, string][]
 
 interface Props {
-  properties      : { id: string; name: string }[]
+  properties      : { id: string; name: string; siblingIds?: string[] }[]
   prefillPropertyId?: string
   prefillType     ?: ChangeTypeValue
   prefillLabel    ?: string
@@ -44,6 +44,11 @@ export function ProposeChangeModal({
     listing_name: string; listing_id: string
   } | null>(null)
   const [hintLoading,   setHintLoading]   = useState(false)
+  const [groupSiblings, setGroupSiblings] = useState<Array<{
+    id: string; name: string
+    price: { base: number | null; min: number | null } | null
+  }> | null>(null)
+  const [sibAck, setSibAck] = useState(false)
 
   const showHint = changeType === "price_base" || changeType === "price_min"
 
@@ -57,6 +62,25 @@ export function ProposeChangeModal({
     return () => { cancelled = true }
   }, [propertyId, changeType, showHint])
 
+  useEffect(() => {
+    const prop   = properties.find(p => p.id === propertyId)
+    const sibIds = prop?.siblingIds ?? []
+    if (sibIds.length === 0) { setGroupSiblings(null); setSibAck(false); return }
+    setGroupSiblings(null)
+    setSibAck(false)
+    Promise.all(
+      sibIds.map(async sid => {
+        const sp    = properties.find(p => p.id === sid)
+        const price = await getPropertyPlPrice(sid)
+        return {
+          id   : sid,
+          name : sp?.name ?? sid,
+          price: price ? { base: price.base, min: price.min } : null,
+        }
+      }),
+    ).then(setGroupSiblings)
+  }, [propertyId])
+
   const lockProperty = !!prefillPropertyId && properties.length === 1
 
   function handleSubmit(e: React.FormEvent) {
@@ -65,6 +89,10 @@ export function ProposeChangeModal({
     if (!propertyId)    { setError("Select a property"); return }
     if (!label.trim())  { setError("Label is required"); return }
     if (!proposedValue.trim()) { setError("Proposed value is required"); return }
+    if (groupSiblings && groupSiblings.length > 0 && !sibAck) {
+      setError("Confirm this proposal is for this listing only")
+      return
+    }
 
     startTransition(async () => {
       const res = await createProposal({
@@ -195,6 +223,36 @@ export function ProposeChangeModal({
                 )}
               </div>
             ) : null
+          )}
+
+          {/* Group warning */}
+          {groupSiblings && groupSiblings.length > 0 && (
+            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-2">
+              <p className="text-xs text-amber-400 font-medium">
+                ⚠ This listing is part of a group. Other members:
+              </p>
+              <ul className="space-y-0.5">
+                {groupSiblings.map(s => (
+                  <li key={s.id} className="text-xs text-muted-foreground">
+                    • {s.name}
+                    {s.price?.base != null && ` — PL base $${s.price.base}`}
+                    {s.price?.min  != null && ` · min $${s.price.min}`}
+                    {!s.price && " — price not mapped"}
+                  </li>
+                ))}
+              </ul>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sibAck}
+                  onChange={e => setSibAck(e.target.checked)}
+                  className="rounded border-input"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Yes, this proposal is for this listing only
+                </span>
+              </label>
+            </div>
           )}
 
           {/* Reason */}

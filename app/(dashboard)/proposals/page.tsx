@@ -38,7 +38,7 @@ export default async function ProposalsPage() {
 
     (admin as any)
       .from("visible_properties")
-      .select("id, external_name, internal_name")
+      .select("id, external_name, internal_name, parent_property_id")
       .eq("is_active", true)
       .order("external_name"),
 
@@ -92,8 +92,24 @@ export default async function ProposalsPage() {
       applied_at       : p.applied_at,
     }))
 
-  const properties = ((propData ?? []) as { id: string; external_name: string; internal_name: string | null }[])
-    .map(p => ({ id: p.id, name: p.internal_name || p.external_name }))
+  const groupsByParent2 = new Map<string, string[]>()
+  for (const p of propData ?? []) {
+    if ((p as any).parent_property_id) {
+      const arr = groupsByParent2.get((p as any).parent_property_id) ?? []
+      arr.push(p.id)
+      groupsByParent2.set((p as any).parent_property_id, arr)
+    }
+  }
+
+  const properties = ((propData ?? []) as any[]).map(p => {
+    let siblingIds: string[] = []
+    if (p.parent_property_id) {
+      siblingIds = [p.parent_property_id, ...(groupsByParent2.get(p.parent_property_id) ?? []).filter((id: string) => id !== p.id)]
+    } else if (groupsByParent2.has(p.id)) {
+      siblingIds = groupsByParent2.get(p.id) ?? []
+    }
+    return { id: p.id, name: p.internal_name || p.external_name, siblingIds }
+  })
 
   const pendingCount = proposals.filter(p => p.status === "pending" || p.status === "approved").length
 

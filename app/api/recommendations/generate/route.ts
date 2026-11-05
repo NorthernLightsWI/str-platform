@@ -1,13 +1,20 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
-import { nightsInWindow } from "@/lib/metrics"
+import { nightsInWindow, occupancyInWindow, adrInWindow } from "@/lib/metrics"
 
 const PERIOD_DAYS   = 90
 const RECENT_DAYS   = 30
 
 // Jun / Jul / Aug are peak months for Appleton (0-indexed month numbers)
 const PEAK_MONTHS = new Set([5, 6, 7])
+
+// Rule keys that evaluate at unit level — skip for group children
+const UNIT_LEVEL_RULE_KEYS = new Set([
+  "low_occupancy_critical", "low_occupancy_high", "adr_below_market",
+  "raise_rates_high_occ", "very_low_revpar", "high_performer_underpriced",
+  "seasonal_opportunity",
+])
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -372,6 +379,17 @@ async function generateRecommendations() {
     }
   }
 
+  // childSet: IDs of properties that are children in a group
+  const childSet = new Set<string>()
+  for (const [, children] of groupsByParent) {
+    for (const cid of children) childSet.add(cid)
+  }
+  // groupAllIds: parentId → all member IDs including parent
+  const groupAllIds = new Map<string, string[]>()
+  for (const [parentId, children] of groupsByParent) {
+    groupAllIds.set(parentId, [parentId, ...children])
+  }
+
   // ── Date strings ──────────────────────────────────────────────────────────
   const nowISO          = new Date().toISOString()
   const todayStr        = today.toISOString().slice(0, 10)
@@ -460,32 +478,67 @@ async function generateRecommendations() {
   const generatedKeysByProp = new Map<string, Set<string>>()  // prop_id → rule_keys fired
 
   for (const p of properties) {
-    const pBookings    = byProperty.get(p.id) ?? []
-    const periodEnd    = new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10)
-    let   bookedNights = 0
-    let   revenue      = 0
-    let   recentCount  = 0
-    let   last14Count  = 0
+    const periodEnd      = new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10)
+    const isGroupParent  = groupAllIds.has(p.id)
+    const isGroupChild   = childSet.has(p.id)
+    const memberIds      = isGroupParent ? (groupAllIds.get(p.id) ?? [p.id]) : [p.id]
 
-    for (const b of pBookings) {
-      const n = nightsInWindow(b, cutoffStr, periodEnd, todayStr)
-      if (n > 0) {
-        const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / 86_400_000)
-        const rev   = Number(b.net_revenue ?? b.total_amount ?? 0)
-        bookedNights += n
-        revenue      += isFinite(rev) ? (n / fullN) * rev : 0
+    let occupancy_pct: number
+    let adr: number
+    let revpar: number
+    let recentCount = 0
+    let last14Count = 0
+
+    if (isGroupParent) {
+      const allMemberBks = (pastBookings ?? []).filter((b: any) => memberIds.includes(b.property_id))
+      occupancy_pct = +occupancyInWindow(allMemberBks, memberIds, cutoffStr, periodEnd, 1, todayStr).toFixed(1)
+      adr           = +adrInWindow(allMemberBks, memberIds, cutoffStr, periodEnd, todayStr).toFixed(2)
+      revpar        = +(adr * occupancy_pct / 100).toFixed(2)
+      // Count arrivals across all member bookings
+      for (const mid of memberIds) {
+        for (const b of byProperty.get(mid) ?? []) {
+          if (b.arrival >= recentCutoffStr) recentCount++
+          if (b.arrival >= last14Str)       last14Count++
+        }
       }
-      if (b.arrival >= recentCutoffStr) recentCount++
-      if (b.arrival >= last14Str)       last14Count++
+    } else {
+      // Per-listing metric computation
+      const pBookings    = byProperty.get(p.id) ?? []
+      let   bookedNights = 0
+      let   revenue      = 0
+
+      for (const b of pBookings) {
+        const n = nightsInWindow(b, cutoffStr, periodEnd, todayStr)
+        if (n > 0) {
+          const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / 86_400_000)
+          const rev   = Number(b.net_revenue ?? b.total_amount ?? 0)
+          bookedNights += n
+          revenue      += isFinite(rev) ? (n / fullN) * rev : 0
+        }
+        if (b.arrival >= recentCutoffStr) recentCount++
+        if (b.arrival >= last14Str)       last14Count++
+      }
+
+      occupancy_pct = +(((bookedNights / PERIOD_DAYS) * 100).toFixed(1))
+      adr           = bookedNights > 0 ? +(revenue / bookedNights).toFixed(2) : 0
+      revpar        = +(revenue / PERIOD_DAYS).toFixed(2)
     }
 
-    const occupancy_pct = +(((bookedNights / PERIOD_DAYS) * 100).toFixed(1))
-    const adr           = bookedNights > 0 ? +(revenue / bookedNights).toFixed(2) : 0
-    const revpar        = +(revenue / PERIOD_DAYS).toFixed(2)
-    const name          = (p as any).internal_name || p.external_name
+    // Name: include child names for group parents
+    const baseName = (p as any).internal_name || p.external_name
+    let name = baseName
+    if (isGroupParent) {
+      const childNames = memberIds
+        .filter(mid => mid !== p.id)
+        .map(mid => {
+          const cp = properties.find(q => q.id === mid)
+          return cp ? ((cp as any).internal_name || cp.external_name) : mid
+        })
+      if (childNames.length) name = `${baseName} (incl. ${childNames.join(", ")})`
+    }
 
-    const propFuture    = futureByProperty.get(p.id) ?? []
-    const upcoming_30   = propFuture.filter(b => b.arrival <= future30Str).length
+    const propFuture = futureByProperty.get(p.id) ?? []
+    const upcoming_30 = propFuture.filter(b => b.arrival <= future30Str).length
 
     const bench = computeBenchmark({
       property     : p,
@@ -514,11 +567,16 @@ async function generateRecommendations() {
       benchmarkLabel  : bench.sourceLabel,
     })
 
+    // Filter out unit-level rule_keys for group children
+    const applicableRecs = isGroupChild
+      ? recs.filter(r => !UNIT_LEVEL_RULE_KEYS.has(r.rule_key))
+      : recs
+
     const firedKeys = new Set<string>()
 
-    for (const r of recs) {
+    for (const r of applicableRecs) {
       firedKeys.add(r.rule_key)
-      const mapKey    = `${p.id}|${r.rule_key}`
+      const mapKey     = `${p.id}|${r.rule_key}`
       const existingId = existingMap.get(mapKey)
 
       const row: Record<string, unknown> = {

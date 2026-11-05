@@ -216,9 +216,25 @@ export default async function PropertyDetailPage({
 
   const year1StartStr = toYMD(year1Start)
   const DAY_MS_PD     = 86_400_000
-  const bkTyped       = (bkData ?? []) as Array<{ arrival: string; departure: string; total_amount: number | null }>
-  const nights12m     = bkTyped.reduce((s, b) => s + nightsInWindow(b, year1StartStr, yesterdayStr, todayStr), 0)
-  const rev12m        = bkTyped.reduce((s, b) => {
+
+  // For group parents: fetch sibling bookings and combine for health score
+  let siblingBkData: typeof bkData = []
+  if (siblings.length > 0 && !property.parent_property_id) {
+    const siblingIds = siblings.map(s => s.id)
+    const { data: sibBks } = await admin
+      .from("bookings")
+      .select("property_id, arrival, departure, total_amount, status")
+      .in("property_id", siblingIds)
+      .neq("is_block", true)
+      .neq("status", "cancelled")
+      .gte("arrival", toYMD(year1Start))
+    siblingBkData = sibBks ?? []
+  }
+  const healthBkData = [...(bkData ?? []), ...siblingBkData]
+
+  const bkTyped  = healthBkData as Array<{ arrival: string; departure: string; total_amount: number | null }>
+  const nights12m = bkTyped.reduce((s, b) => s + nightsInWindow(b, year1StartStr, yesterdayStr, todayStr), 0)
+  const rev12m    = bkTyped.reduce((s, b) => {
     const n = nightsInWindow(b, year1StartStr, yesterdayStr, todayStr)
     if (n <= 0) return s
     const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / DAY_MS_PD)

@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
 import { computeHealthScore, type HealthInput } from "@/lib/health-score"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
-import { nightsInWindow } from "@/lib/metrics"
+import { nightsInWindow, occupancyInWindow } from "@/lib/metrics"
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -78,6 +78,14 @@ export default async function PropertiesPage() {
   const properties: any[] = allProperties
   const bookings:   any[] = bkData ?? []
 
+  // groupAllIdsMap: any member ID → all member IDs for that group
+  const groupAllIdsMap = new Map<string, string[]>()
+  for (const g of groups) {
+    for (const mid of g.allIds) {
+      groupAllIdsMap.set(mid, g.allIds)
+    }
+  }
+
   // ── Pre-aggregate health score inputs ─────────────────────────────────────
 
   // Reviews: count ALL reviews per property; separately track rating sum/count
@@ -117,7 +125,7 @@ export default async function PropertiesPage() {
   const rows: PropertyRow[] = properties.map(p => {
     const pb = bookings.filter(b => b.property_id === p.id)
 
-    // MTD metrics: window-clipped
+    // MTD metrics: window-clipped (per-listing)
     let mtdNights = 0, mtdRevenue = 0
     for (const b of pb) {
       const n = nightsInWindow(b, cmStartStr, cmEndStr, todayStrPp)
@@ -129,9 +137,20 @@ export default async function PropertiesPage() {
     const mtdOccupancy = cmDays > 0 ? Math.min(100, (mtdNights / cmDays) * 100) : 0
     const mtdAdr       = mtdNights > 0 ? mtdRevenue / mtdNights : 0
 
-    // Trailing 12m metrics for health score: window-clipped
+    // Unit MTD occupancy for grouped properties
+    const memberIds     = groupAllIdsMap.get(p.id) ?? [p.id]
+    const isGroupMember = memberIds.length > 1
+    const unitMtdOccupancy = isGroupMember
+      ? +occupancyInWindow(bookings, memberIds, cmStartStr, cmEndStr, 1, todayStrPp).toFixed(2)
+      : undefined
+
+    // Trailing 12m metrics for health score: use combined member bookings for group parents
+    const isGroupParent = groups.some(g => g.parent.id === p.id)
+    const healthBks     = isGroupParent
+      ? bookings.filter(b => memberIds.includes(b.property_id))
+      : pb
     let nights12m = 0, rev12m = 0
-    for (const b of pb) {
+    for (const b of healthBks) {
       const n = nightsInWindow(b, year1Str, yesterdayStr, todayStrPp)
       if (n <= 0) continue
       const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / PROP_DAY_MS)
@@ -154,20 +173,21 @@ export default async function PropertiesPage() {
     const hs = computeHealthScore(input)
 
     return {
-      id           : p.id,
-      external_name: p.external_name,
-      internal_name: p.internal_name,
-      city         : p.city,
-      state        : p.state,
-      bedrooms     : p.bedrooms,
-      bathrooms    : p.bathrooms,
-      max_guests   : p.max_guests,
-      is_active    : p.is_active,
-      parentName   : parentNameMap.get(p.id) ?? null,
-      mtdRevenue   : Math.round(mtdRevenue),
-      mtdOccupancy : +mtdOccupancy.toFixed(2),
-      mtdAdr       : Math.round(mtdAdr),
-      healthScore  : hs.total,
+      id              : p.id,
+      external_name   : p.external_name,
+      internal_name   : p.internal_name,
+      city            : p.city,
+      state           : p.state,
+      bedrooms        : p.bedrooms,
+      bathrooms       : p.bathrooms,
+      max_guests      : p.max_guests,
+      is_active       : p.is_active,
+      parentName      : parentNameMap.get(p.id) ?? null,
+      mtdRevenue      : Math.round(mtdRevenue),
+      mtdOccupancy    : +mtdOccupancy.toFixed(2),
+      mtdAdr          : Math.round(mtdAdr),
+      healthScore     : hs.total,
+      unitMtdOccupancy,
     }
   })
 

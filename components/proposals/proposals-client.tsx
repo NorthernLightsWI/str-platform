@@ -284,7 +284,7 @@ export function ProposalsClient({
   writesEnabled,
 }: {
   proposals    : ProposalRow[]
-  properties   : { id: string; name: string }[]
+  properties   : { id: string; name: string; siblingIds?: string[] }[]
   writesEnabled: boolean
 }) {
   const router                     = useRouter()

@@ -2,6 +2,7 @@
 // No framework imports — safe to call from server actions and API routes.
 
 import { buildPropertyGroups } from "@/lib/property-groups"
+import { nightsInWindow } from "@/lib/metrics"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -136,16 +137,13 @@ function computePropertyMetrics(
   for (const b of bookings) {
     if (b.property_id !== propertyId) continue
 
-    const aMs = dateToMs(b.arrival)
-    const dMs = dateToMs(b.departure)
-    const totalNights = Math.max(1, (dMs - aMs) / DAY_MS)
-
-    // Nights that fall within the window
-    const overlapStart = Math.max(aMs, wsMs)
-    const overlapEnd   = Math.min(dMs, weMs)
-    const nights       = Math.max(0, (overlapEnd - overlapStart) / DAY_MS)
+    // Use nightsInWindow for window-overlap clipping (today-cap never fires for past windows)
+    const nights = nightsInWindow(b, windowStart, windowEnd)
 
     if (nights > 0) {
+      const aMs         = dateToMs(b.arrival)
+      const dMs         = dateToMs(b.departure)
+      const totalNights = Math.max(1, (dMs - aMs) / DAY_MS)
       nightsBooked += nights
       revenue      += (nights / totalNights) * revenueOf(b)
       bookingCount++

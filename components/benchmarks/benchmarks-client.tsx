@@ -7,18 +7,21 @@ import { cn } from "@/lib/utils"
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PropertyRow = {
-  id              : string
-  name            : string
-  occupancy       : number   // 0–100
-  adr             : number   // dollars
-  revpar          : number   // dollars
-  score           : number   // 0–100
-  benchmarkOcc    : number
-  benchmarkAdr    : number
-  benchmarkRevpar : number
-  benchmarkSource : string
-  comparableCount : number
-  isActive        : boolean
+  id               : string
+  name             : string
+  occupancy        : number   // 0–100
+  adr              : number   // dollars
+  revpar           : number   // dollars
+  score            : number   // 0–100
+  benchmarkOcc     : number
+  benchmarkAdr     : number
+  benchmarkRevpar  : number
+  benchmarkSource  : string
+  comparableCount  : number
+  isActive         : boolean
+  listingType      : string
+  listingTypeBasis : string
+  unitOccupancy   ?: number   // defined only for grouped listings
 }
 
 export type PortfolioSummary = {
@@ -318,11 +321,22 @@ export function BenchmarksClient({
                   {!row.isActive && (
                     <span className="text-[10px] text-muted-foreground/60 font-normal">inactive</span>
                   )}
+                  <span
+                    title={row.listingTypeBasis}
+                    className="inline-flex items-center rounded-full border px-1.5 py-0 text-[9px] font-medium bg-muted/40 text-muted-foreground border-border cursor-help"
+                  >
+                    {row.listingType}
+                  </span>
                 </td>
 
                 {/* Occupancy */}
                 <td className="px-3 py-3 text-right tabular-nums text-foreground font-medium">
                   {fmtPct(row.occupancy)}
+                  {row.unitOccupancy !== undefined && (
+                    <div className="text-[10px] text-muted-foreground/60 font-normal leading-tight">
+                      unit {fmtPct(row.unitOccupancy)}
+                    </div>
+                  )}
                 </td>
                 <MktTd>{fmtPct(row.benchmarkOcc)}</MktTd>
                 <DiffCell value={row.occupancy - row.benchmarkOcc}     unit="pp"  />
