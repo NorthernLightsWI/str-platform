@@ -672,8 +672,8 @@ export async function getPropertyBenchmarkTiers(
         .select("property_id, arrival, departure, net_revenue, total_amount")
         .neq("status", "cancelled")
         .eq("is_block", false)
-        .gte("arrival", new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10))
-        .lt("arrival", new Date().toISOString().slice(0, 10)),
+        .lt("arrival", new Date().toISOString().slice(0, 10))
+        .gt("departure", new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)),
 
       (admin as any)
         .from("visible_properties")
@@ -686,7 +686,10 @@ export async function getPropertyBenchmarkTiers(
     if (!prop) return { error: "Property not found" }
 
     const allProps     = (allPropsRaw ?? []) as PropertyMeta[]
-    const aggBookings  = aggregateBookings(comp90Raw ?? [])
+    const sa90Start    = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
+    const sa90End      = new Date(Date.now() -      86_400_000).toISOString().slice(0, 10)
+    const saTodayStr   = new Date().toISOString().slice(0, 10)
+    const aggBookings  = aggregateBookings(comp90Raw ?? [], sa90Start, sa90End, saTodayStr)
     const bookingMap   = new Map(aggBookings.map(b => [b.property_id, b]))
 
     // Build sibling set for this property

@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMarketDefaults } from "@/lib/benchmarks"
+import { nightsInWindow } from "@/lib/metrics"
 import {
   MarketIntelClient,
   type PortfolioSummary,
@@ -26,23 +27,24 @@ export default async function MarketIntelPage() {
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
-      .gte("arrival", periodStartStr)
-      .lt("arrival", todayStr),
+      .lt("arrival", todayStr)
+      .gt("departure", periodStartStr),
 
     getMarketDefaults(createAdminClient()),
   ])
 
-  const propCount  = (propData ?? []).length
+  const propCount    = (propData ?? []).length
+  const MI_DAY_MS    = 86_400_000
   let   totalBooked  = 0
   let   totalRevenue = 0
 
   for (const b of (bookingData ?? [])) {
-    const arrMs  = new Date(b.arrival   + "T00:00:00").getTime()
-    const depMs  = new Date(b.departure + "T00:00:00").getTime()
-    const nights = Math.max(0, (depMs - arrMs) / 86_400_000)
-    totalBooked  += nights
-    const rev     = Number(b.net_revenue ?? b.total_amount ?? 0)
-    totalRevenue += isFinite(rev) ? rev : 0
+    const n = nightsInWindow(b, periodStartStr, new Date(new Date(todayStr + "T00:00:00Z").getTime() - MI_DAY_MS).toISOString().slice(0, 10), todayStr)
+    if (n <= 0) continue
+    const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / MI_DAY_MS)
+    const rev   = Number(b.net_revenue ?? b.total_amount ?? 0)
+    totalBooked  += n
+    totalRevenue += isFinite(rev) ? (n / fullN) * rev : 0
   }
 
   const totalAvail = PERIOD_DAYS * Math.max(propCount, 1)

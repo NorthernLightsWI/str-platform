@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
+import { nightsInWindow } from "@/lib/metrics"
 
 const PERIOD_DAYS   = 90
 const RECENT_DAYS   = 30
@@ -394,8 +395,8 @@ async function generateRecommendations() {
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
-      .gte("arrival", cutoffStr)
-      .lt("arrival", todayStr),
+      .lt("arrival", todayStr)
+      .gt("departure", cutoffStr),
 
     (admin as any)
       .from("visible_bookings")
@@ -431,7 +432,7 @@ async function generateRecommendations() {
 
   // ── Fetch market defaults and build aggregated bookings for benchmarks ─────
   const { marketAdr, marketOcc } = await getMarketDefaults(admin)
-  const aggBookings = aggregateBookings(pastBookings ?? [])
+  const aggBookings = aggregateBookings(pastBookings ?? [], cutoffStr, new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10), todayStr)
 
   // ── Aggregate past bookings ───────────────────────────────────────────────
   const byProperty = new Map<string, NonNullable<typeof pastBookings>>()
@@ -460,20 +461,20 @@ async function generateRecommendations() {
 
   for (const p of properties) {
     const pBookings    = byProperty.get(p.id) ?? []
+    const periodEnd    = new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10)
     let   bookedNights = 0
     let   revenue      = 0
     let   recentCount  = 0
     let   last14Count  = 0
 
     for (const b of pBookings) {
-      const nights = Math.max(
-        0,
-        (new Date(b.departure + "T00:00:00").getTime() - new Date(b.arrival + "T00:00:00").getTime())
-        / 86_400_000,
-      )
-      bookedNights += nights
-      const rev     = Number(b.net_revenue ?? b.total_amount ?? 0)
-      revenue      += isFinite(rev) ? rev : 0
+      const n = nightsInWindow(b, cutoffStr, periodEnd, todayStr)
+      if (n > 0) {
+        const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / 86_400_000)
+        const rev   = Number(b.net_revenue ?? b.total_amount ?? 0)
+        bookedNights += n
+        revenue      += isFinite(rev) ? (n / fullN) * rev : 0
+      }
       if (b.arrival >= recentCutoffStr) recentCount++
       if (b.arrival >= last14Str)       last14Count++
     }

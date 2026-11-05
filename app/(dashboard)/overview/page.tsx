@@ -6,6 +6,7 @@ import { RevenueChart, type RevenueDataPoint   } from "@/components/overview/rev
 import { OccupancyChart, type OccupancyDataPoint } from "@/components/overview/occupancy-chart"
 import { computeHealthScore, healthColor, type HealthInput } from "@/lib/health-score"
 import { buildPropertyGroups, mergeChildBookings, childIdSet } from "@/lib/property-groups"
+import { nightsInWindow } from "@/lib/metrics"
 import { cn } from "@/lib/utils"
 
 // ── Date helpers (UTC-safe, no external deps) ─────────────────────────────────
@@ -62,29 +63,31 @@ type KPIs = { revenue: number; occupancy: number; adr: number; revpar: number }
 
 // ── KPI computation ───────────────────────────────────────────────────────────
 
+const KPI_DAY_MS = 86_400_000
+
 function computeKPIs(
   bookings    : BookingRow[],
   activeCount : number,
   start       : Date,
-  end         : Date,
+  end         : Date,         // exclusive
 ): KPIs {
-  const days            = (end.getTime() - start.getTime()) / 86_400_000
+  const days            = (end.getTime() - start.getTime()) / KPI_DAY_MS
   const availableNights = activeCount * days
+  const startStr = toYMD(start)
+  const endStr   = toYMD(new Date(end.getTime() - KPI_DAY_MS))  // inclusive end
+  const todayStr = toYMD(new Date())
 
-  // Attribute revenue + nights to the booking's arrival month
-  const inRange = bookings.filter(b => {
-    if (b.status === "cancelled") return false
-    const a = new Date(b.arrival + "T00:00:00Z")
-    return a >= start && a < end
-  })
+  let revenue      = 0
+  let bookedNights = 0
 
-  const revenue = inRange.reduce((s, b) => s + (b.total_amount ?? 0), 0)
-
-  const bookedNights = inRange.reduce((s, b) => {
-    const a = new Date(b.arrival   + "T00:00:00Z")
-    const d = new Date(b.departure + "T00:00:00Z")
-    return s + (d.getTime() - a.getTime()) / 86_400_000
-  }, 0)
+  for (const b of bookings) {
+    if (b.status === "cancelled") continue
+    const n = nightsInWindow(b, startStr, endStr, todayStr)
+    if (n <= 0) continue
+    const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / KPI_DAY_MS)
+    revenue      += (n / fullN) * (b.total_amount ?? 0)
+    bookedNights += n
+  }
 
   const occupancy = availableNights > 0 ? (bookedNights / availableNights) * 100 : 0
   const adr       = bookedNights > 0 ? revenue / bookedNights : 0
@@ -294,30 +297,37 @@ export default async function OverviewPage() {
     return g ? g.allIds : [propId]
   }
 
+  const cmStartStr  = toYMD(cmStart)
+  const cmEndStr    = toYMD(addDays(cmEnd, -1))  // inclusive end for window
+  const todayStrOv  = toYMD(today)
+  const year1Str    = toYMD(addDays(today, -365))
+  const yesterdayOv = toYMD(addDays(today, -1))
+
   const healthRows: HealthRow[] = activeProps.map(p => {
     const mids = memberIds(p.id)
+    const pb   = bookings.filter(b => b.property_id === p.id && b.status !== "cancelled")
 
-    const pbMTD = bookings.filter(b => {
-      if (b.status === "cancelled") return false
-      const a = new Date(b.arrival + "T00:00:00Z")
-      return b.property_id === p.id && a >= cmStart && a < cmEnd
-    })
-    const mtdRevenue = pbMTD.reduce((s, b) => s + (b.total_amount ?? 0), 0)
-    const mtdNights  = pbMTD.reduce((s, b) => {
-      const a = new Date(b.arrival   + "T00:00:00Z")
-      const d = new Date(b.departure + "T00:00:00Z")
-      return s + (d.getTime() - a.getTime()) / 86_400_000
-    }, 0)
+    // MTD: window-clipped nights and prorated revenue
+    let mtdNights = 0, mtdRevenue = 0
+    for (const b of pb) {
+      const n = nightsInWindow(b, cmStartStr, cmEndStr, todayStrOv)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / KPI_DAY_MS)
+      mtdNights  += n
+      mtdRevenue += (n / fullN) * (b.total_amount ?? 0)
+    }
     const mtdOccupancy = cmDays > 0 ? Math.min(100, (mtdNights / cmDays) * 100) : 0
 
-    const pb12m     = bookings.filter(b => b.property_id === p.id && b.status !== "cancelled")
-    const rev12m    = pb12m.reduce((s, b) => s + (b.total_amount ?? 0), 0)
-    const nights12m = pb12m.reduce((s, b) => {
-      const a = new Date(b.arrival   + "T00:00:00Z")
-      const d = new Date(b.departure + "T00:00:00Z")
-      return s + (d.getTime() - a.getTime()) / 86_400_000
-    }, 0)
-    const occ12m = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
+    // 12m health: window-clipped
+    let nights12m = 0, rev12m = 0
+    for (const b of pb) {
+      const n = nightsInWindow(b, year1Str, yesterdayOv, todayStrOv)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / KPI_DAY_MS)
+      nights12m += n
+      rev12m    += (n / fullN) * (b.total_amount ?? 0)
+    }
+    const occ12m = Math.min(100, (nights12m / 365) * 100)
     const adr12m = nights12m > 0 ? rev12m / nights12m : 0
 
     // Aggregate reviews/cleaning/maint across all member IDs
@@ -364,16 +374,19 @@ export default async function OverviewPage() {
   // ── 12-month revenue ──────────────────────────────────────────────────────
 
   const revenueByMonth: RevenueDataPoint[] = Array.from({ length: 12 }, (_, i) => {
-    const mStart = prevMonthStart(today, 11 - i)
-    const mEnd   = i < 11 ? prevMonthStart(today, 10 - i) : cmEnd
+    const mStart    = prevMonthStart(today, 11 - i)
+    const mEnd      = i < 11 ? prevMonthStart(today, 10 - i) : cmEnd
+    const mStartStr = toYMD(mStart)
+    const mEndStr   = toYMD(addDays(mEnd, -1))  // inclusive end
 
     const rev = bookings
-      .filter(b => {
-        if (b.status === "cancelled") return false
-        const a = new Date(b.arrival + "T00:00:00Z")
-        return a >= mStart && a < mEnd
-      })
-      .reduce((s, b) => s + (b.total_amount ?? 0), 0)
+      .filter(b => b.status !== "cancelled")
+      .reduce((s, b) => {
+        const n = nightsInWindow(b, mStartStr, mEndStr, todayStrOv)
+        if (n <= 0) return s
+        const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / KPI_DAY_MS)
+        return s + (n / fullN) * (b.total_amount ?? 0)
+      }, 0)
 
     return {
       month   : mStart.toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }),

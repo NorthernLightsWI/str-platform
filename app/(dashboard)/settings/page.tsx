@@ -48,7 +48,7 @@ export default async function SettingsPage() {
     admin.from("properties").select("id, external_name, internal_name, is_active, is_hidden, parent_property_id").order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
-    (admin as any).from("visible_bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).gte("arrival", comp90Start).lt("arrival", todayStr),
+    (admin as any).from("visible_bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).lt("arrival", todayStr).gt("departure", comp90Start),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -154,7 +154,8 @@ export default async function SettingsPage() {
   }
 
   const hiddenSet        = new Set(hiddenIds)
-  const benchAggBookings = aggregateBookings(comp90Data ?? [])
+  const comp90End        = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  const benchAggBookings = aggregateBookings(comp90Data ?? [], comp90Start, comp90End, todayStr)
   const benchActiveProps : PropertyMeta[] = ((benchPropData ?? []) as RawBenchProp[]).map(p => ({
     id                           : p.id,
     external_name                : p.external_name,

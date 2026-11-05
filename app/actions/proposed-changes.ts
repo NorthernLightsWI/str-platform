@@ -51,14 +51,17 @@ export async function createProposal(data: {
 
   const admin = createAdminClient()
 
-  // Reject hidden properties — visible_properties excludes is_hidden=true
+  // Reject hidden or inactive properties
   const { data: visibleProp } = await (admin as any)
     .from("visible_properties")
-    .select("id, pricelabs_listing_id")
+    .select("id, pricelabs_listing_id, is_active")
     .eq("id", data.property_id)
     .maybeSingle()
   if (!visibleProp) {
     return { error: "Cannot propose changes for hidden properties" }
+  }
+  if (!visibleProp.is_active) {
+    return { error: "Cannot propose changes for inactive properties" }
   }
 
   const prop = visibleProp
@@ -155,12 +158,15 @@ export async function applyProposal(
 
   const { data: proposal } = await (admin as any)
     .from("visible_proposed_changes")
-    .select(`*, properties ( pricelabs_listing_id, pricelabs_price_floor )`)
+    .select(`*, properties ( pricelabs_listing_id, pricelabs_price_floor, is_active )`)
     .eq("id", id)
     .eq("status", "approved")
     .single()
 
   if (!proposal) return { error: "Proposal not found or not approved" }
+  if (proposal.properties?.is_active === false) {
+    return { error: "Cannot apply changes to inactive properties" }
+  }
 
   // Block change types that cannot be applied via the API
   if (MANUAL_ONLY_CHANGE_TYPES.has(proposal.change_type)) {

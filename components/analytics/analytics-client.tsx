@@ -85,33 +85,28 @@ function computeData(bookings: BookingRaw[], properties: PropertyRaw[], monthCou
     const lastDay     = new Date(ms.getFullYear(), ms.getMonth() + 1, 0)
     const totalNights = daysInMonth(ms) * propCount
 
-    let revenue = 0, bookedNights = 0, revenueForADR = 0, nightsForADR = 0
+    let bookedNights = 0, windowRevenue = 0
 
     for (const b of bookings) {
       const arr = parseLocal(b.arrival)
       const dep = parseLocal(b.departure)
       const rev = b.net_revenue ?? b.total_amount ?? 0
 
-      // Overlap nights for occupancy
-      const olStart = arr  > ms     ? arr  : ms
-      const olEnd   = dep  < nextMs ? dep  : nextMs
-      const nights  = Math.max(0, (olEnd.getTime() - olStart.getTime()) / 86400000)
+      // Overlap nights (clipped to window and today)
+      const olStart   = arr  > ms     ? arr  : ms
+      const olEnd     = dep  < nextMs ? (dep < today ? dep : today) : (nextMs < today ? nextMs : today)
+      const nights    = Math.max(0, (olEnd.getTime() - olStart.getTime()) / 86400000)
+      if (nights <= 0) continue
+      const fullNights = Math.max(1, (dep.getTime() - arr.getTime()) / 86400000)
       bookedNights += nights
-
-      // Revenue & ADR: bookings arriving this month
-      if (arr >= ms && arr <= lastDay) {
-        const bNights = (dep.getTime() - arr.getTime()) / 86400000
-        revenue      += rev
-        revenueForADR += rev
-        nightsForADR  += bNights
-      }
+      windowRevenue += (nights / fullNights) * rev
     }
 
     return {
       month     : `${MO[ms.getMonth()]} '${String(ms.getFullYear()).slice(2)}`,
-      revenue   : Math.round(revenue),
+      revenue   : Math.round(windowRevenue),
       occupancy : totalNights > 0 ? Math.round((bookedNights / totalNights) * 1000) / 10 : 0,
-      adr       : nightsForADR > 0 ? Math.round(revenueForADR / nightsForADR) : 0,
+      adr       : bookedNights > 0 ? Math.round(windowRevenue / bookedNights) : 0,
     }
   })
 

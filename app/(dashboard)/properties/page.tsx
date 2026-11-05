@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { PropertiesTable, type PropertyRow } from "@/components/properties/properties-table"
 import { computeHealthScore, type HealthInput } from "@/lib/health-score"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
+import { nightsInWindow } from "@/lib/metrics"
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -106,33 +107,38 @@ export default async function PropertiesPage() {
 
   // ── Build rows ────────────────────────────────────────────────────────────
 
+  const cmStartStr   = toYMD(cmStart)
+  const cmEndStr     = toYMD(addDays(cmEnd, -1))
+  const todayStrPp   = toYMD(today)
+  const year1Str     = toYMD(addDays(today, -365))
+  const yesterdayStr = toYMD(addDays(today, -1))
+  const PROP_DAY_MS  = 86_400_000
+
   const rows: PropertyRow[] = properties.map(p => {
     const pb = bookings.filter(b => b.property_id === p.id)
 
-    // MTD subset
-    const pbMTD = pb.filter(b => {
-      const a = new Date(b.arrival + "T00:00:00Z")
-      return a >= cmStart && a < cmEnd
-    })
-
-    // MTD metrics
-    const mtdRevenue   = pbMTD.reduce((s, b) => s + Number(b.total_amount ?? 0), 0)
-    const mtdNights    = pbMTD.reduce((s, b) => {
-      const a = new Date(b.arrival   + "T00:00:00Z")
-      const d = new Date(b.departure + "T00:00:00Z")
-      return s + Math.max(0, (d.getTime() - a.getTime()) / 86_400_000)
-    }, 0)
+    // MTD metrics: window-clipped
+    let mtdNights = 0, mtdRevenue = 0
+    for (const b of pb) {
+      const n = nightsInWindow(b, cmStartStr, cmEndStr, todayStrPp)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / PROP_DAY_MS)
+      mtdNights  += n
+      mtdRevenue += (n / fullN) * Number(b.total_amount ?? 0)
+    }
     const mtdOccupancy = cmDays > 0 ? Math.min(100, (mtdNights / cmDays) * 100) : 0
     const mtdAdr       = mtdNights > 0 ? mtdRevenue / mtdNights : 0
 
-    // Trailing 12m metrics for health score
-    const rev12m    = pb.reduce((s, b) => s + Number(b.total_amount ?? 0), 0)
-    const nights12m = pb.reduce((s, b) => {
-      const a = new Date(b.arrival   + "T00:00:00Z")
-      const d = new Date(b.departure + "T00:00:00Z")
-      return s + Math.max(0, (d.getTime() - a.getTime()) / 86_400_000)
-    }, 0)
-    const occ12m = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
+    // Trailing 12m metrics for health score: window-clipped
+    let nights12m = 0, rev12m = 0
+    for (const b of pb) {
+      const n = nightsInWindow(b, year1Str, yesterdayStr, todayStrPp)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / PROP_DAY_MS)
+      nights12m += n
+      rev12m    += (n / fullN) * Number(b.total_amount ?? 0)
+    }
+    const occ12m = Math.min(100, (nights12m / 365) * 100)
     const adr12m = nights12m > 0 ? rev12m / nights12m : 0
 
     // Health score

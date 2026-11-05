@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { Resend } from "resend"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { buildPropertyGroups, childIdSet } from "@/lib/property-groups"
+import { nightsInWindow } from "@/lib/metrics"
 import {
   buildMonthlyEmailHtml,
   computeAmenityGaps,
@@ -58,14 +59,14 @@ async function generateAndSendReport(): Promise<NextResponse> {
     (supabase as any).from("visible_properties").select("id, internal_name, external_name, parent_property_id, is_active"),
     (supabase as any).from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
-      .gte("arrival", period.start)
       .lt("arrival", period.end)
+      .gt("departure", period.start)
       .neq("is_block", true)
       .neq("status", "cancelled"),
     (supabase as any).from("visible_bookings")
       .select("property_id, arrival, departure, total_amount, is_block, status")
-      .gte("arrival", period.prevStart)
       .lt("arrival", period.prevEnd)
+      .gt("departure", period.prevStart)
       .neq("is_block", true)
       .neq("status", "cancelled"),
     (supabase as any).from("visible_reviews")
@@ -114,11 +115,31 @@ async function generateAndSendReport(): Promise<NextResponse> {
   // Amenity gap analysis is forward-looking — active properties only
   const activeProps = props.filter(p => p.is_active)
 
-  const currBook    = (currBookings ?? []) as Array<{ property_id: string; arrival: string; departure: string; total_amount: number | null }>
-  const prevBook    = (prevBookings ?? []) as Array<{ property_id: string; total_amount: number | null }>
+  type PeriodBook = { property_id: string; arrival: string; departure: string; total_amount: number | null }
+  const currBook    = (currBookings ?? []) as PeriodBook[]
+  const prevBook    = (prevBookings ?? []) as PeriodBook[]
   const reviewList  = (reviews ?? [])     as Array<{ property_id: string; overall_rating: number }>
   const recList     = (recs ?? [])        as Array<{ property_id: string; title: string; priority: string }>
   const amenities   = (amenityRows ?? []) as Array<{ property_id: string; amenity_key: string; is_present: boolean }>
+
+  const REP_DAY_MS  = 86_400_000
+  const currStart   = period.start.slice(0, 10)
+  const currEnd     = period.end.slice(0, 10)
+  const prevStart   = period.prevStart.slice(0, 10)
+  const prevEnd     = new Date(new Date(period.prevEnd).getTime() - REP_DAY_MS).toISOString().slice(0, 10)
+  const todayStrRep = new Date().toISOString().slice(0, 10)
+
+  function windowedMetrics(bks: PeriodBook[], wStart: string, wEnd: string) {
+    let nights = 0, rev = 0
+    for (const b of bks) {
+      const n = nightsInWindow(b, wStart, wEnd, todayStrRep)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure).getTime() - new Date(b.arrival).getTime()) / REP_DAY_MS)
+      nights += n
+      rev    += (n / fullN) * (b.total_amount ?? 0)
+    }
+    return { nights, rev }
+  }
 
   const propertyRows: PropertyReportRow[] = props.map(p => {
     // For groups, aggregate bookings from all member IDs
@@ -126,16 +147,8 @@ async function generateAndSendReport(): Promise<NextResponse> {
     const myCurr = currBook.filter(b => ids.includes(b.property_id))
     const myPrev = prevBook.filter(b => ids.includes(b.property_id))
 
-    const revenue     = myCurr.reduce((s, b) => s + (b.total_amount ?? 0), 0)
-    const revenuePrev = myPrev.reduce((s, b) => s + (b.total_amount ?? 0), 0)
-
-    // Booked nights = sum of (departure - arrival) per booking, capped at period
-    const bookedNights = myCurr.reduce((s, b) => {
-      const nights = Math.round(
-        (new Date(b.departure).getTime() - new Date(b.arrival).getTime()) / 86_400_000,
-      )
-      return s + Math.max(0, nights)
-    }, 0)
+    const { nights: bookedNights, rev: revenue     } = windowedMetrics(myCurr, currStart, currEnd)
+    const { rev:    revenuePrev }                     = windowedMetrics(myPrev, prevStart, prevEnd)
 
     const occupancy  = Math.min(100, Math.round((bookedNights / 30) * 100))
     const adr        = bookedNights > 0 ? revenue / bookedNights : 0

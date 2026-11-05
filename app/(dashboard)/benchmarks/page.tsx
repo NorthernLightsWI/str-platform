@@ -79,8 +79,8 @@ export default async function BenchmarksPage() {
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
-      .gte("arrival", comp90Start)
-      .lt("arrival", todayStr),
+      .lt("arrival", todayStr)
+      .gt("departure", comp90Start),
 
     (admin as any)
       .from("visible_properties")
@@ -114,7 +114,8 @@ export default async function BenchmarksPage() {
     }
   }
 
-  const aggBookings90 = aggregateBookings(comp90Data ?? [])
+  const comp90End     = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  const aggBookings90 = aggregateBookings(comp90Data ?? [], comp90Start, comp90End, todayStr)
 
   // ── PriceLabs neighborhood cache ──────────────────────────────────────────
   // Fetch/refresh PL neighborhood data for mapped properties

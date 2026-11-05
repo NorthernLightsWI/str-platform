@@ -3,6 +3,7 @@
 // Server-side only — imports admin client.
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { nightsInWindow } from "@/lib/metrics"
 
 export type ListingType = "nightly" | "weekly" | "monthly"
 
@@ -249,34 +250,39 @@ export function extractPlBenchmark(
 
 // ── Bookings aggregation ──────────────────────────────────────────────────────
 
-const COMP_WINDOW_DAYS = 90
+export const COMP_WINDOW_DAYS = 90
 
 export function aggregateBookings(
-  bookings: Array<{
+  bookings     : Array<{
     property_id  : string
     arrival      : string
     departure    : string
     net_revenue ?: number | null
     total_amount?: number | null
   }>,
+  windowStart  : string,  // YYYY-MM-DD inclusive
+  windowEnd    : string,  // YYYY-MM-DD inclusive (should be yesterday or last day of period)
+  today       ?: string,
 ): AggBooking[] {
   const map = new Map<string, AggBooking>()
   for (const b of bookings) {
-    const nights = Math.max(
-      0,
-      (new Date(b.departure + "T00:00:00").getTime() -
-       new Date(b.arrival   + "T00:00:00").getTime()) / 86_400_000,
+    const nights = nightsInWindow(b, windowStart, windowEnd, today)
+    if (nights <= 0) continue
+    const fullNights = Math.max(1,
+      (new Date(b.departure + "T00:00:00Z").getTime() -
+       new Date(b.arrival   + "T00:00:00Z").getTime()) / 86_400_000,
     )
-    const rev      = Number((b as any).net_revenue ?? (b as any).total_amount ?? 0)
+    const rev      = Number(b.net_revenue ?? b.total_amount ?? 0)
+    const proratedRev = isFinite(rev) ? (nights / fullNights) * rev : 0
     const existing = map.get(b.property_id)
     if (existing) {
       existing.bookedNights += nights
-      existing.revenue      += isFinite(rev) ? rev : 0
+      existing.revenue      += proratedRev
     } else {
       map.set(b.property_id, {
         property_id : b.property_id,
         bookedNights: nights,
-        revenue     : isFinite(rev) ? rev : 0,
+        revenue     : proratedRev,
       })
     }
   }

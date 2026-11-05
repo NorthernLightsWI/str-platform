@@ -3,6 +3,7 @@ import { createClient }      from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { computeHealthScore, type HealthInput } from "@/lib/health-score"
 import { getMarketDefaults, aggregateBookings, computeBenchmark, type PropertyMeta } from "@/lib/benchmarks"
+import { nightsInWindow } from "@/lib/metrics"
 import {
   PropertyDetailClient,
   type PropertyDetail,
@@ -34,6 +35,8 @@ export default async function PropertyDetailPage({
   const day60Start = addDays(today, -60)
 
   const comp90Start = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
+  const yesterdayStr = addDays(today, -1).toISOString().slice(0, 10)
+  const todayStr     = toYMD(today)
 
   const [
     { data: property },
@@ -123,8 +126,8 @@ export default async function PropertyDetailPage({
       .select("property_id, arrival, departure, net_revenue, total_amount")
       .neq("status", "cancelled")
       .eq("is_block", false)
-      .gte("arrival", comp90Start)
-      .lt("arrival", toYMD(today)),
+      .lt("arrival", todayStr)
+      .gt("departure", comp90Start),
 
     (admin as any)
       .from("visible_properties")
@@ -178,7 +181,7 @@ export default async function PropertyDetailPage({
   }
 
   const allPropsMeta = (allPropsData ?? []) as PropertyMeta[]
-  const aggBookings90 = aggregateBookings(comp90Data ?? [])
+  const aggBookings90 = aggregateBookings(comp90Data ?? [], comp90Start, yesterdayStr, todayStr)
 
   // Build hiddenIds from prop groups fetch (we re-use the sibling exclusion approach)
   const propGroupsSiblings = new Set<string>()
@@ -211,15 +214,19 @@ export default async function PropertyDetailPage({
 
   // ── Health score ──────────────────────────────────────────────────────────
 
-  const nights12m = (bkData ?? []).reduce((s: number, b: any) => {
-    const a = new Date(b.arrival   + "T00:00:00Z")
-    const d = new Date(b.departure + "T00:00:00Z")
-    return s + Math.max(0, (d.getTime() - a.getTime()) / 86_400_000)
+  const year1StartStr = toYMD(year1Start)
+  const DAY_MS_PD     = 86_400_000
+  const bkTyped       = (bkData ?? []) as Array<{ arrival: string; departure: string; total_amount: number | null }>
+  const nights12m     = bkTyped.reduce((s, b) => s + nightsInWindow(b, year1StartStr, yesterdayStr, todayStr), 0)
+  const rev12m        = bkTyped.reduce((s, b) => {
+    const n = nightsInWindow(b, year1StartStr, yesterdayStr, todayStr)
+    if (n <= 0) return s
+    const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / DAY_MS_PD)
+    return s + (n / fullN) * Number(b.total_amount ?? 0)
   }, 0)
-  const rev12m  = (bkData ?? []).reduce((s: number, b: any) => s + Number(b.total_amount ?? 0), 0)
-  const occ12m  = nights12m > 0 ? Math.min(100, (nights12m / 365) * 100) : 0
-  const adr12m  = nights12m > 0 ? rev12m / nights12m : 0
-  const revpar  = rev12m / 365
+  const occ12m        = Math.min(100, (nights12m / 365) * 100)
+  const adr12m        = nights12m > 0 ? rev12m / nights12m : 0
+  const revpar        = rev12m / 365
 
   const allReviews  = reviewData ?? []
   const ratings     = allReviews
