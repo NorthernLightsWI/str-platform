@@ -480,7 +480,7 @@ export default async function OverviewPage() {
         {/* 12-month revenue */}
         <div className="xl:col-span-3 rounded-xl border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground">12-Month Revenue</p>
-          <p className="text-xs text-muted-foreground mt-0.5 mb-5">Portfolio revenue by arrival month</p>
+          <p className="text-xs text-muted-foreground mt-0.5 mb-5">Night-allocated revenue by calendar month</p>
           <RevenueChart data={revenueByMonth} />
         </div>
 

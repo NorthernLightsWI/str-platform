@@ -147,11 +147,17 @@ async function generateAndSendReport(): Promise<NextResponse> {
     const myCurr = currBook.filter(b => ids.includes(b.property_id))
     const myPrev = prevBook.filter(b => ids.includes(b.property_id))
 
-    const { nights: bookedNights, rev: revenue     } = windowedMetrics(myCurr, currStart, currEnd)
-    const { rev:    revenuePrev }                     = windowedMetrics(myPrev, prevStart, prevEnd)
+    const { nights: bookedNights, rev: windowRevenue } = windowedMetrics(myCurr, currStart, currEnd)
+    // Revenue column uses arrival-date attribution (full booking amount counted in arrival period)
+    const revenue     = myCurr
+      .filter(b => b.arrival >= currStart && b.arrival < currEnd)
+      .reduce((s, b) => s + (b.total_amount ?? 0), 0)
+    const revenuePrev = myPrev
+      .filter(b => b.arrival >= prevStart && b.arrival < currStart)
+      .reduce((s, b) => s + (b.total_amount ?? 0), 0)
 
     const occupancy  = Math.min(100, Math.round((bookedNights / 30) * 100))
-    const adr        = bookedNights > 0 ? revenue / bookedNights : 0
+    const adr        = bookedNights > 0 ? windowRevenue / bookedNights : 0
 
     // Reviews: average rating across all group members
     const propReviews = reviewList.filter(r => ids.includes(r.property_id))
