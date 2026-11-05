@@ -206,9 +206,12 @@ export function PropertiesTable({ rows }: { rows: PropertyRow[] }) {
                       {row.mtdOccupancy > 0 ? row.mtdOccupancy.toFixed(1) + "%" : "—"}
                     </span>
                     {row.unitMtdOccupancy !== undefined && (
-                      <div className="text-[10px] text-muted-foreground/60 leading-tight whitespace-nowrap">
-                        unit {row.unitMtdOccupancy.toFixed(1)}%
-                      </div>
+                      <>
+                        <div className="text-[10px] text-muted-foreground/40 leading-tight">this listing</div>
+                        <div className="text-[10px] text-muted-foreground/60 leading-tight whitespace-nowrap">
+                          unit {row.unitMtdOccupancy.toFixed(1)}%
+                        </div>
+                      </>
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-right font-medium text-foreground tabular-nums">

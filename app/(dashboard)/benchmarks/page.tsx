@@ -16,7 +16,7 @@ import {
   type PropertyMeta,
   type PlNeighborhoodData,
 } from "@/lib/benchmarks"
-import { occupancyInWindow } from "@/lib/metrics"
+import { nightsInWindow, occupancyInWindow } from "@/lib/metrics"
 import { fetchNeighborhoodData } from "@/lib/pricelabs"
 
 // ── Score formula ─────────────────────────────────────────────────────────────
@@ -168,11 +168,12 @@ export default async function BenchmarksPage() {
     let   revenue      = 0
 
     for (const b of bookings) {
-      const arrMs  = new Date(b.arrival   + "T00:00:00").getTime()
-      const depMs  = new Date(b.departure + "T00:00:00").getTime()
-      bookedNights += Math.max(0, (depMs - arrMs) / 86_400_000)
-      const rev = Number(b.net_revenue ?? b.total_amount ?? 0)
-      revenue  += isFinite(rev) ? rev : 0
+      const n = nightsInWindow(b, periodStartStr, yesterdayStr, todayStr)
+      if (n <= 0) continue
+      const fullN = Math.max(1, (new Date(b.departure + "T00:00:00Z").getTime() - new Date(b.arrival + "T00:00:00Z").getTime()) / 86_400_000)
+      const rev   = Number(b.net_revenue ?? b.total_amount ?? 0)
+      bookedNights += n
+      revenue      += isFinite(rev) ? (n / fullN) * rev : 0
     }
 
     const occupancy = bookedNights > 0 ? (bookedNights / PERIOD_DAYS) * 100 : 0

@@ -333,9 +333,12 @@ export function BenchmarksClient({
                 <td className="px-3 py-3 text-right tabular-nums text-foreground font-medium">
                   {fmtPct(row.occupancy)}
                   {row.unitOccupancy !== undefined && (
-                    <div className="text-[10px] text-muted-foreground/60 font-normal leading-tight">
-                      unit {fmtPct(row.unitOccupancy)}
-                    </div>
+                    <>
+                      <div className="text-[10px] text-muted-foreground/40 font-normal leading-tight">this listing</div>
+                      <div className="text-[10px] text-muted-foreground/60 font-normal leading-tight">
+                        unit {fmtPct(row.unitOccupancy)}
+                      </div>
+                    </>
                   )}
                 </td>
                 <MktTd>{fmtPct(row.benchmarkOcc)}</MktTd>
