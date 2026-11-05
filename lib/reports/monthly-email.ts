@@ -182,7 +182,7 @@ export function buildMonthlyEmailHtml(data: MonthlyReportData): string {
               <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Revenue (by arrival)</th>
               <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">vs Last</th>
               <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Occ</th>
-              <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">ADR</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">ADR (per night)</th>
               <th style="padding:6px 8px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Top Rec</th>
               <th style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Health</th>
             </tr>
