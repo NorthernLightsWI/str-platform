@@ -1139,6 +1139,212 @@ export type Database = {
           },
         ]
       }
+      thermostat_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          occurred_at: string
+          property_id: string | null
+          request: Json | null
+          response: Json | null
+          source: string
+          thermostat_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          property_id?: string | null
+          request?: Json | null
+          response?: Json | null
+          source: string
+          thermostat_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          occurred_at?: string
+          property_id?: string | null
+          request?: Json | null
+          response?: Json | null
+          source?: string
+          thermostat_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "thermostat_events_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "thermostat_events_thermostat_id_fkey"
+            columns: ["thermostat_id"]
+            isOneToOne: false
+            referencedRelation: "thermostats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      thermostat_schedules: {
+        Row: {
+          booking_id: string | null
+          created_at: string
+          ends_at: string
+          id: string
+          property_id: string
+          seam_schedule_id: string | null
+          starts_at: string
+          status: string
+          thermostat_id: string
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string
+          ends_at: string
+          id?: string
+          property_id: string
+          seam_schedule_id?: string | null
+          starts_at: string
+          status?: string
+          thermostat_id: string
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string
+          ends_at?: string
+          id?: string
+          property_id?: string
+          seam_schedule_id?: string | null
+          starts_at?: string
+          status?: string
+          thermostat_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "thermostat_schedules_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "thermostat_schedules_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "thermostat_schedules_thermostat_id_fkey"
+            columns: ["thermostat_id"]
+            isOneToOne: false
+            referencedRelation: "thermostats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      thermostat_settings: {
+        Row: {
+          checkout_buffer_minutes: number
+          created_at: string
+          dry_run: boolean
+          enabled: boolean
+          freeze_floor: number
+          id: string
+          occupied_cool: number
+          occupied_heat: number
+          property_id: string
+          updated_at: string
+          vacant_cool: number
+          vacant_heat: number
+          warmup_minutes: number
+        }
+        Insert: {
+          checkout_buffer_minutes?: number
+          created_at?: string
+          dry_run?: boolean
+          enabled?: boolean
+          freeze_floor?: number
+          id?: string
+          occupied_cool?: number
+          occupied_heat?: number
+          property_id: string
+          updated_at?: string
+          vacant_cool?: number
+          vacant_heat?: number
+          warmup_minutes?: number
+        }
+        Update: {
+          checkout_buffer_minutes?: number
+          created_at?: string
+          dry_run?: boolean
+          enabled?: boolean
+          freeze_floor?: number
+          id?: string
+          occupied_cool?: number
+          occupied_heat?: number
+          property_id?: string
+          updated_at?: string
+          vacant_cool?: number
+          vacant_heat?: number
+          warmup_minutes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "thermostat_settings_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: true
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      thermostats: {
+        Row: {
+          capabilities: Json | null
+          created_at: string
+          id: string
+          label: string
+          last_seen: string | null
+          property_id: string
+          seam_device_id: string
+          updated_at: string
+        }
+        Insert: {
+          capabilities?: Json | null
+          created_at?: string
+          id?: string
+          label?: string
+          last_seen?: string | null
+          property_id: string
+          seam_device_id: string
+          updated_at?: string
+        }
+        Update: {
+          capabilities?: Json | null
+          created_at?: string
+          id?: string
+          label?: string
+          last_seen?: string | null
+          property_id?: string
+          seam_device_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "thermostats_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       visible_properties: {
@@ -1180,6 +1386,65 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      visible_thermostats: {
+        Row: {
+          capabilities: Json | null
+          created_at: string
+          id: string
+          label: string
+          last_seen: string | null
+          property_id: string
+          seam_device_id: string
+          updated_at: string
+        }
+        Relationships: []
+      }
+      visible_thermostat_settings: {
+        Row: {
+          checkout_buffer_minutes: number
+          created_at: string
+          dry_run: boolean
+          enabled: boolean
+          freeze_floor: number
+          id: string
+          occupied_cool: number
+          occupied_heat: number
+          property_id: string
+          updated_at: string
+          vacant_cool: number
+          vacant_heat: number
+          warmup_minutes: number
+        }
+        Relationships: []
+      }
+      visible_thermostat_schedules: {
+        Row: {
+          booking_id: string | null
+          created_at: string
+          ends_at: string
+          id: string
+          property_id: string
+          seam_schedule_id: string | null
+          starts_at: string
+          status: string
+          thermostat_id: string
+        }
+        Relationships: []
+      }
+      visible_thermostat_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          occurred_at: string
+          property_id: string | null
+          request: Json | null
+          response: Json | null
+          source: string
+          thermostat_id: string | null
+        }
+        Relationships: []
       }
     }
     Functions: {

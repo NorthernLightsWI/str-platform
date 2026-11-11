@@ -21,6 +21,13 @@ import {
 } from "@/components/settings/settings-client"
 import { type PropertyVisibilityRow } from "@/components/settings/visibility-tab"
 import { type PropertyGroupRow } from "@/components/settings/groups-tab"
+import {
+  type ThermostatTabProps,
+  type ThermostatDeviceRow,
+  type ThermostatSettingsRow,
+  type ThermostatEventRow,
+  type ThermostatPropertyRow,
+} from "@/components/settings/thermostats-tab"
 
 function parseSettingValue(raw: unknown): string {
   if (typeof raw === "string") return raw
@@ -41,7 +48,11 @@ export default async function SettingsPage() {
   const comp90Start = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
   const todayStr    = new Date().toISOString().slice(0, 10)
 
-  const [{ data: settingsData }, { data: usersData }, { data: logData }, { data: propData }, { data: plPropData }, { data: benchPropData }, { data: comp90Data }] = await Promise.all([
+  const [
+    { data: settingsData }, { data: usersData }, { data: logData },
+    { data: propData }, { data: plPropData }, { data: benchPropData }, { data: comp90Data },
+    { data: thermostatDeviceData }, { data: thermostatSettingsData }, { data: thermostatEventData },
+  ] = await Promise.all([
     admin.from("app_settings").select("key, value"),
     admin.from("profiles").select("id, email, full_name, role, created_at").order("created_at"),
     (admin as any).from("visible_sync_log").select("*").order("created_at", { ascending: false }).limit(10),
@@ -49,6 +60,9 @@ export default async function SettingsPage() {
     (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, pricelabs_listing_id, pricelabs_price_floor").eq("is_active", true).order("external_name"),
     (admin as any).from("properties").select("id, external_name, internal_name, is_hidden, bedrooms, listing_type, benchmark_adr_override, benchmark_occupancy_override, pricelabs_listing_id").eq("is_active", true).order("external_name"),
     (admin as any).from("visible_bookings").select("property_id, arrival, departure, net_revenue, total_amount").neq("status", "cancelled").eq("is_block", false).lt("arrival", todayStr).gt("departure", comp90Start),
+    (admin as any).from("visible_thermostats").select("*").order("created_at"),
+    (admin as any).from("visible_thermostat_settings").select("*"),
+    (admin as any).from("visible_thermostat_events").select("*").order("occurred_at", { ascending: false }).limit(50),
   ])
 
   const rawSettings: Record<string, string> = {}
@@ -224,6 +238,54 @@ export default async function SettingsPage() {
     }
   })
 
+  // ── Thermostat data ──────────────────────────────────────────────────────────
+  const thermostatVisibleProps = ((propData ?? []) as any[])
+    .filter((p: any) => !p.is_hidden && p.is_active)
+    .map((p: any): ThermostatPropertyRow => ({ id: p.id, name: p.internal_name || p.external_name }))
+
+  const thermostatDevices: ThermostatDeviceRow[] = ((thermostatDeviceData ?? []) as any[]).map((d: any) => ({
+    id            : d.id,
+    property_id   : d.property_id,
+    seam_device_id: d.seam_device_id,
+    label         : d.label,
+    capabilities  : d.capabilities ?? null,
+    last_seen     : d.last_seen ?? null,
+  }))
+
+  const thermostatSettings: ThermostatSettingsRow[] = ((thermostatSettingsData ?? []) as any[]).map((s: any) => ({
+    property_id            : s.property_id,
+    enabled                : s.enabled ?? false,
+    dry_run                : s.dry_run ?? true,
+    occupied_heat          : s.occupied_heat ?? 68,
+    occupied_cool          : s.occupied_cool ?? 74,
+    vacant_heat            : s.vacant_heat   ?? 58,
+    vacant_cool            : s.vacant_cool   ?? 82,
+    freeze_floor           : s.freeze_floor  ?? 55,
+    warmup_minutes         : s.warmup_minutes ?? 180,
+    checkout_buffer_minutes: s.checkout_buffer_minutes ?? 0,
+  }))
+
+  const thermostatEvents: ThermostatEventRow[] = ((thermostatEventData ?? []) as any[]).map((e: any) => ({
+    id           : e.id,
+    property_id  : e.property_id ?? null,
+    thermostat_id: e.thermostat_id ?? null,
+    occurred_at  : e.occurred_at,
+    action       : e.action,
+    request      : e.request ?? null,
+    response     : e.response ?? null,
+    source       : e.source,
+  }))
+
+  const thermostatProps: ThermostatTabProps & { initialApiKey: string } = {
+    workspaceMode    : rawSettings.seam_workspace_mode         ?? "sandbox",
+    masterEnabled    : rawSettings.thermostat_automation_enabled === "true",
+    initialApiKey    : rawSettings.seam_api_key                ?? "",
+    initialProperties: thermostatVisibleProps,
+    initialDevices   : thermostatDevices,
+    initialSettings  : thermostatSettings,
+    initialEvents    : thermostatEvents,
+  }
+
   return (
     <div className="p-6 space-y-5 max-w-[900px]">
       <div>
@@ -242,6 +304,7 @@ export default async function SettingsPage() {
         groupProperties={groupProperties}
         plProperties={plProperties}
         benchmarkProperties={benchmarkProperties}
+        thermostatProps={thermostatProps}
       />
     </div>
   )

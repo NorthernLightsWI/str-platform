@@ -36,6 +36,10 @@ const PROPERTY_SCOPED_TABLES = [
   "property_amenities",
   "listing_changes",
   "proposed_changes",
+  "thermostats",
+  "thermostat_settings",
+  "thermostat_schedules",
+  "thermostat_events",
 ]
 
 // Regex: .from("table") or .from('table') — catches both quote styles

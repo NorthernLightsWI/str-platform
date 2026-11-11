@@ -28,6 +28,7 @@ import {
 } from "@/app/actions/settings"
 import { PropertyVisibilityTab, type PropertyVisibilityRow } from "@/components/settings/visibility-tab"
 import { GroupsTab, type PropertyGroupRow } from "@/components/settings/groups-tab"
+import { ThermostatsTab, type ThermostatTabProps } from "@/components/settings/thermostats-tab"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ export type SyncLogRow = {
   created_at     : string
 }
 
-type Tab ="integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs" | "benchmarks"
+type Tab = "integrations" | "users" | "sync" | "visibility" | "groups" | "reports" | "pricelabs" | "benchmarks" | "thermostats"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1758,6 +1759,7 @@ export function SettingsClient({
   groupProperties,
   plProperties = [],
   benchmarkProperties = [],
+  thermostatProps,
 }: {
   settings             : SettingsData
   users                : UserRow[]
@@ -1767,18 +1769,20 @@ export function SettingsClient({
   groupProperties      : PropertyGroupRow[]
   plProperties        ?: PriceLabsPropertyRow[]
   benchmarkProperties ?: BenchmarkPropertyRow[]
+  thermostatProps     ?: ThermostatTabProps & { initialApiKey: string }
 }) {
   const [tab, setTab] = useState<Tab>("integrations")
 
   const TABS: { value: Tab; label: string; icon: React.ElementType }[] = [
-    { value: "integrations", label: "Integrations", icon: Plug      },
-    { value: "pricelabs",    label: "PriceLabs",     icon: Database  },
-    { value: "benchmarks",   label: "Benchmarks",    icon: BarChart2 },
-    { value: "users",        label: "Users",         icon: Users     },
-    { value: "sync",         label: "Data Sync",     icon: Database  },
-    { value: "visibility",   label: "Visibility",    icon: Building2 },
-    { value: "groups",       label: "Groups",        icon: Building2 },
-    { value: "reports",      label: "Reports",       icon: Mail      },
+    { value: "integrations", label: "Integrations", icon: Plug        },
+    { value: "pricelabs",    label: "PriceLabs",    icon: Database    },
+    { value: "benchmarks",   label: "Benchmarks",   icon: BarChart2   },
+    { value: "thermostats",  label: "Thermostats",  icon: Activity    },
+    { value: "users",        label: "Users",         icon: Users      },
+    { value: "sync",         label: "Data Sync",    icon: Database    },
+    { value: "visibility",   label: "Visibility",   icon: Building2   },
+    { value: "groups",       label: "Groups",        icon: Building2  },
+    { value: "reports",      label: "Reports",       icon: Mail       },
   ]
 
   return (
@@ -1819,6 +1823,7 @@ export function SettingsClient({
       )}
       {tab === "groups"       && <GroupsTab initialProperties={groupProperties} />}
       {tab === "reports"      && <ReportsTab initialEmail={settings.report_email} />}
+      {tab === "thermostats"  && thermostatProps && <ThermostatsTab {...thermostatProps} />}
     </div>
   )
 }
